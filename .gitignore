@@ -1,0 +1,87 @@
+# ─── Python ──────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+*.so
+*.whl
+
+# ─── Virtual Environments ───────────────────────────────────────
+.venv/
+venv/
+ENV/
+env/
+
+# ─── uv ─────────────────────────────────────────────────────────
+.uv/
+
+# ─── IDE / Editor ───────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+*.sublime-project
+*.sublime-workspace
+
+# ─── Environment Variables ──────────────────────────────────────
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# ─── OS Generated ───────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# ─── Testing ────────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+coverage/
+*.cover
+
+# ─── Linting / Type Checking ────────────────────────────────────
+.ruff_cache/
+.mypy_cache/
+.dmypy.json
+
+# ─── Node / Frontend ────────────────────────────────────────────
+node_modules/
+.next/
+out/
+.turbo/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# ─── Uploads & Storage (runtime data) ───────────────────────────
+uploads/
+storage/
+
+# ─── SQLite (local dev DB) ──────────────────────────────────────
+*.db
+*.sqlite3
+
+# ─── Log Files ──────────────────────────────────────────────────
+*.log
+
+# ─── Docker (local volumes) ─────────────────────────────────────
+docker-data/
+
+# ─── Scraped Data (large PDFs) ──────────────────────────────────
+web-scrap/rwanda_papers/
+web-scrap/rwanda_papers_organized1/
+
+# ─── Misc ────────────────────────────────────────────────────────
+*.bak
+*.tmp
+*.temp

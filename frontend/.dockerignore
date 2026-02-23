@@ -1,0 +1,43 @@
+# Dependencies (installed fresh in build)
+node_modules/
+.pnp/
+.pnp.js
+
+# Build output
+.next/
+out/
+dist/
+build/
+
+# Testing
+__tests__/
+coverage/
+jest.config.js
+jest.setup.js
+
+# IDE
+.idea/
+.vscode/
+
+# Git
+.git/
+.gitignore
+
+# Env files
+.env
+.env.local
+.env.*.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+Dockerfile
+.dockerignore
+
+# Docs
+*.md
+DEVELOPMENT.md
+INTEGRATION.md
+README.md

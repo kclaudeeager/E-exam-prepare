@@ -1,0 +1,59 @@
+[project]
+name = "e-exam-rag-service"
+version = "0.1.0"
+description = "E-exam-prepare LlamaIndex RAG service"
+requires-python = ">=3.12"
+dependencies = [
+    # Core framework
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.34.0",
+    "pydantic>=2.10.0",
+    "pydantic-settings>=2.7.0",
+    "python-multipart>=0.0.18",
+    # LlamaIndex core
+    "llama-index-core>=0.12.0",
+    "llama-index-readers-file>=0.4.0",
+    # LLM providers
+    "llama-index-llms-openai>=0.3.0",
+    "llama-index-llms-gemini>=0.4.0",
+    "llama-index-llms-groq>=0.4.0",  # Free LLM provider (recommended for dev)
+    # Custom LLM providers (Groq + Google Gemini)
+    "groq>=0.17.0",
+    "google-genai>=0.9.0",
+    # Embedding providers
+    "llama-index-embeddings-openai>=0.3.0",
+    "llama-index-embeddings-gemini>=0.3.0",
+    # Free local embeddings (no API key needed).
+    # onnxruntime>=1.21 dropped Intel macOS wheels, so cap it here.
+    "llama-index-embeddings-fastembed>=0.4.0",
+    "fastembed>=0.4.0",
+    "onnxruntime>=1.16.3,<1.21.0",
+    # Retrieval
+    "llama-index-retrievers-bm25>=0.4.0",
+    # Reranking
+    "llama-index-postprocessor-flag-embedding-reranker>=0.3.0",
+    # Document parsing
+    "llama-parse>=0.6.0",
+    "pdfplumber>=0.11.0",
+    # HTTP
+    "httpx>=0.28.0",
+    # Utilities
+    "python-dotenv>=1.0.0",
+    "pymupdf>=1.27.1",
+    "pillow>=10.4.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.25.0",
+    "ruff>=0.9.0",
+    "mypy>=1.14.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]

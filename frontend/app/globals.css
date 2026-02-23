@@ -1,0 +1,81 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@keyframes indeterminate {
+  0%   { transform: translateX(-100%) scaleX(0.4); }
+  50%  { transform: translateX(50%)   scaleX(0.6); }
+  100% { transform: translateX(200%)  scaleX(0.4); }
+}
+
+* {
+  @apply border-border;
+}
+
+html {
+  @apply scroll-smooth;
+}
+
+body {
+  @apply bg-background text-foreground;
+}
+
+/* ── Loading & Transitions ────────────────────────────────────────────── */
+
+.loading {
+  @apply animate-pulse;
+}
+
+/* ── Typography ───────────────────────────────────────────────────────── */
+
+h1 {
+  @apply text-3xl font-bold;
+}
+
+h2 {
+  @apply text-2xl font-bold;
+}
+
+h3 {
+  @apply text-xl font-semibold;
+}
+
+p {
+  @apply text-base leading-relaxed;
+}
+
+/* ── Forms ────────────────────────────────────────────────────────────── */
+
+input,
+textarea,
+select {
+  @apply rounded border border-input bg-background px-3 py-2 text-foreground placeholder-muted-foreground focus:border-primary focus:outline-none;
+}
+
+button {
+  @apply rounded font-medium transition-all duration-200;
+}
+
+button:disabled {
+  @apply cursor-not-allowed opacity-50;
+}
+
+/* ── Cards & Containers ───────────────────────────────────────────────── */
+
+.card {
+  @apply rounded-lg border border-border bg-card p-6 shadow-sm;
+}
+
+.container {
+  @apply mx-auto max-w-7xl px-4;
+}
+
+/* ── Utilities ────────────────────────────────────────────────────────── */
+
+.flex-center {
+  @apply flex items-center justify-center;
+}
+
+.flex-between {
+  @apply flex items-center justify-between;
+}

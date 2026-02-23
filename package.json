@@ -1,0 +1,26 @@
+{
+  "name": "e-exam-prepare",
+  "version": "0.1.0",
+  "description": "Personalized exam preparation platform",
+  "private": true,
+  "scripts": {
+    "dev:all": "concurrently \"npm run dev:frontend\" \"npm run dev:backend\" \"npm run dev:rag\"",
+    "dev:frontend": "cd frontend && npm run dev",
+    "dev:backend": "cd backend && uv run uvicorn app.main:app --reload --port 8000",
+    "dev:rag": "cd rag-service && uv run uvicorn app.main:app --reload --port 8001",
+    "build:frontend": "cd frontend && npm run build",
+    "test": "concurrently \"npm run test:frontend\" \"npm run test:backend\"",
+    "test:frontend": "cd frontend && npm run test",
+    "test:backend": "cd backend && uv run pytest",
+    "test:rag": "cd rag-service && uv run pytest",
+    "lint": "uv run ruff check backend/ rag-service/",
+    "format": "uv run ruff format backend/ rag-service/",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f",
+    "db:migrate": "cd backend && uv run alembic upgrade head"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.0"
+  }
+}

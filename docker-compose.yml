@@ -1,0 +1,112 @@
+services:
+  # ── PostgreSQL ────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-exam_prep}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-exam_prep_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-exam_prep}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U exam_prep"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ── Redis ─────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ── FastAPI Backend ───────────────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-exam_prep}:${POSTGRES_PASSWORD:-exam_prep_dev}@postgres:5432/${POSTGRES_DB:-exam_prep}
+      CELERY_BROKER_URL: redis://redis:6379/0
+      RAG_SERVICE_URL: http://rag-service:8001
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - backend_uploads:/app/uploads
+    restart: unless-stopped
+
+  # ── RAG Service ───────────────────────────────────────────────────────
+  rag-service:
+    build:
+      context: ./rag-service
+      dockerfile: Dockerfile
+    env_file: .env
+    environment:
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      LLAMA_INDEX_PROVIDER: ${LLAMA_INDEX_PROVIDER:-groq}
+    ports:
+      - "8001:8001"
+    volumes:
+      - rag_storage:/app/storage
+    restart: unless-stopped
+
+  # ── Next.js Frontend ──────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+      BACKEND_INTERNAL_URL: http://backend:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  # ── Celery Worker ─────────────────────────────────────────────────────
+  celery-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-exam_prep}:${POSTGRES_PASSWORD:-exam_prep_dev}@postgres:5432/${POSTGRES_DB:-exam_prep}
+      CELERY_BROKER_URL: redis://redis:6379/0
+      RAG_SERVICE_URL: http://rag-service:8001
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rag-service:
+        condition: service_started
+    restart: unless-stopped
+    command: uv run celery -A app.celery_app worker --loglevel=info
+
+volumes:
+  postgres_data:
+  redis_data:
+  backend_uploads:
+  rag_storage:

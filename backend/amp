@@ -1,0 +1,20 @@
+INFO:     Started server process [89549]
+INFO:     Started server process [89549]
+INFO:     Waiting for application startup.
+INFO:     Waiting for application startup.
+2026-02-23 14:37:27,343  app.main                   INFO      🚀 E-exam-prepare backend starting…
+2026-02-23 14:37:27,343  app.main                   INFO      🚀 E-exam-prepare backend starting…
+INFO:     Application startup complete.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     Shutting down
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Waiting for application shutdown.
+2026-02-23 14:51:01,467  app.main                   INFO      ✅ E-exam-prepare backend shut down
+2026-02-23 14:51:01,467  app.main                   INFO      ✅ E-exam-prepare backend shut down
+INFO:     Application shutdown complete.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [89549]
+INFO:     Finished server process [89549]
