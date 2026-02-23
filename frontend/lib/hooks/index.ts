@@ -6,7 +6,7 @@ import { useCallback } from 'react';
 import useSWR, { SWRConfiguration } from 'swr';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/lib/stores/auth';
-import { authAPI, documentAPI, quizAPI, attemptAPI, progressAPI, apiClient } from '@/lib/api';
+import { authAPI, documentAPI, quizAPI, attemptAPI, progressAPI, adminAPI, apiClient } from '@/lib/api';
 import {
   UserCreate,
   UserLogin,
@@ -16,6 +16,9 @@ import {
   AttemptSubmit,
   AttemptRead,
   ProgressRead,
+  StudentSummary,
+  StudentDetail,
+  AnalyticsResponse,
 } from '@/lib/types';
 import { API_ENDPOINTS } from '@/config/constants';
 
@@ -215,6 +218,57 @@ export const useProgress = (swrConfig?: SWRConfiguration) => {
 
   return {
     progress,
+    isLoading,
+    error,
+    mutate,
+  };
+};
+
+// ── useAdminStudents Hook ─────────────────────────────────────────────────
+
+export const useAdminStudents = (search?: string, swrConfig?: SWRConfiguration) => {
+  const { data: students, error, isLoading, mutate } = useSWR<StudentSummary[]>(
+    [API_ENDPOINTS.ADMIN_STUDENTS_LIST, search],
+    () => adminAPI.listStudents(search || undefined),
+    swrConfig,
+  );
+
+  return {
+    students: students || [],
+    isLoading,
+    error,
+    mutate,
+  };
+};
+
+// ── useAdminStudentDetail Hook ────────────────────────────────────────────
+
+export const useAdminStudentDetail = (studentId: string | null, swrConfig?: SWRConfiguration) => {
+  const { data: student, error, isLoading, mutate } = useSWR<StudentDetail>(
+    studentId ? [API_ENDPOINTS.ADMIN_STUDENT_DETAIL(studentId)] : null,
+    () => (studentId ? adminAPI.getStudent(studentId) : null) as Promise<StudentDetail>,
+    swrConfig,
+  );
+
+  return {
+    student,
+    isLoading,
+    error,
+    mutate,
+  };
+};
+
+// ── useAdminAnalytics Hook ────────────────────────────────────────────────
+
+export const useAdminAnalytics = (days = 30, swrConfig?: SWRConfiguration) => {
+  const { data: analytics, error, isLoading, mutate } = useSWR<AnalyticsResponse>(
+    [API_ENDPOINTS.ADMIN_ANALYTICS, days],
+    () => adminAPI.getAnalytics(days),
+    swrConfig,
+  );
+
+  return {
+    analytics,
     isLoading,
     error,
     mutate,

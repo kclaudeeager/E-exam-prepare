@@ -167,6 +167,85 @@ export interface ProgressRead {
   last_attempt_at?: string;
 }
 
+// ── Admin Dashboard ───────────────────────────────────────────────────────
+
+export interface StudentSummary {
+  id: string;
+  email: string;
+  full_name: string;
+  is_active: boolean;
+  created_at: string;
+  total_attempts: number;
+  overall_accuracy: number;
+  last_attempt_at: string | null;
+}
+
+export interface StudentAttemptSummary {
+  id: string;
+  score: number;
+  total: number;
+  percentage: number;
+  started_at: string;
+  submitted_at: string | null;
+}
+
+export interface StudentDetail extends StudentSummary {
+  topic_metrics: TopicMetric[];
+  weak_topics: string[];
+  recent_attempts: StudentAttemptSummary[];
+}
+
+export interface SystemOverview {
+  total_students: number;
+  total_admins: number;
+  total_documents: number;
+  total_questions: number;
+  total_quizzes: number;
+  total_attempts: number;
+  avg_accuracy: number;
+  active_students_7d: number;
+  active_students_30d: number;
+}
+
+export interface SubjectStat {
+  subject: string;
+  document_count: number;
+  question_count: number;
+  attempt_count: number;
+  avg_accuracy: number;
+}
+
+export interface TrendPoint {
+  date: string;
+  attempts: number;
+  avg_accuracy: number;
+  active_students: number;
+}
+
+export interface TopicStat {
+  topic: string;
+  total_attempts: number;
+  avg_accuracy: number;
+  student_count: number;
+}
+
+export interface RecentAttempt {
+  id: string;
+  student_name: string;
+  score: number;
+  total: number;
+  percentage: number;
+  submitted_at: string | null;
+}
+
+export interface AnalyticsResponse {
+  overview: SystemOverview;
+  subject_stats: SubjectStat[];
+  trends: TrendPoint[];
+  topic_stats: TopicStat[];
+  recent_attempts: RecentAttempt[];
+}
+
 // ── API Responses ──────────────────────────────────────────────────────────
 
 export interface ErrorResponse {

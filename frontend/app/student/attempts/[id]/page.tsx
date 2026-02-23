@@ -327,7 +327,7 @@ export default function AttemptDetailPage() {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gray-50">
+      <div className="flex flex-1 items-center justify-center">
         <div className="text-center">
           <div className="mx-auto mb-4 h-12 w-12 animate-spin rounded-full border-4 border-blue-200 border-t-blue-600" />
           <p className="text-gray-600">Loading attempt...</p>
@@ -338,7 +338,7 @@ export default function AttemptDetailPage() {
 
   if (error || !attempt) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gray-50">
+      <div className="flex flex-1 items-center justify-center">
         <div className="rounded-xl border bg-white p-8 text-center shadow-sm">
           <p className="mb-4 text-red-600">{error || 'Attempt not found'}</p>
           <button
@@ -363,7 +363,7 @@ export default function AttemptDetailPage() {
         : attempt.answers.filter((a) => !a.is_correct);
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <>
       {/* Header */}
       <header className="border-b bg-white shadow-sm">
         <div className="mx-auto max-w-4xl px-4 py-4">
@@ -557,6 +557,6 @@ export default function AttemptDetailPage() {
           </button>
         </div>
       </main>
-    </div>
+    </>
   );
 }

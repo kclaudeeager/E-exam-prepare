@@ -274,7 +274,7 @@ export default function QuizPage() {
   // Show results if submitted
   if (result) {
     return (
-      <div className="min-h-screen bg-gray-50">
+      <>
         <header className="border-b bg-white shadow-sm">
           <div className="mx-auto max-w-3xl px-4 py-4">
             <h1 className="text-2xl font-bold text-gray-900">Quiz Results</h1>
@@ -288,7 +288,7 @@ export default function QuizPage() {
             onBack={() => router.push(ROUTES.STUDENT_PRACTICE)}
           />
         </main>
-      </div>
+      </>
     );
   }
 
@@ -298,7 +298,7 @@ export default function QuizPage() {
   const timerSeconds = (quiz.duration_minutes || totalQuestions * 2) * 60;
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <>
       {/* Sticky Header */}
       <header className="sticky top-0 z-10 border-b bg-white shadow-sm">
         <div className="mx-auto flex max-w-4xl items-center justify-between px-4 py-3">
@@ -505,6 +505,6 @@ export default function QuizPage() {
           </div>
         </div>
       )}
-    </div>
+    </>
   );
 }

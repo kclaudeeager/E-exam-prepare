@@ -6,7 +6,6 @@ import Link from 'next/link';
 import { useAuth } from '@/lib/hooks';
 import { documentAPI } from '@/lib/api';
 import { DocumentRead } from '@/lib/types';
-import Navbar from '@/components/Navbar';
 import { ROUTES, EDUCATION_LEVELS } from '@/config/constants';
 
 const LEVEL_LABELS: Record<string, string> = Object.fromEntries(
@@ -88,9 +87,7 @@ export default function BrowseExamsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <Navbar />
-
+    <>
       <main className="container py-8">
         <div className="mb-6 flex flex-col gap-1">
           <h1 className="text-2xl font-bold text-gray-900">Exam Papers</h1>
@@ -198,6 +195,6 @@ export default function BrowseExamsPage() {
           </div>
         )}
       </main>
-    </div>
+    </>
   );
 }

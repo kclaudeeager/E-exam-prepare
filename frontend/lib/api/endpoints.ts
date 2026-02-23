@@ -22,6 +22,9 @@ import {
   ChatSessionRead,
   ChatSessionDetail,
   ChatMessageRead,
+  StudentSummary,
+  StudentDetail,
+  AnalyticsResponse,
 } from '@/lib/types';
 
 // ── Auth ───────────────────────────────────────────────────────────────────
@@ -275,6 +278,35 @@ export const chatAPI = {
 export const healthAPI = {
   check: async () => {
     const response = await apiClient.get(API_ENDPOINTS.HEALTH);
+    return response.data;
+  },
+};
+
+// ── Admin ─────────────────────────────────────────────────────────────────
+
+export const adminAPI = {
+  listStudents: async (search?: string, skip = 0, limit = 50): Promise<StudentSummary[]> => {
+    const params = new URLSearchParams();
+    if (search) params.append('search', search);
+    params.append('skip', String(skip));
+    params.append('limit', String(limit));
+    const response = await apiClient.get<StudentSummary[]>(
+      `${API_ENDPOINTS.ADMIN_STUDENTS_LIST}?${params.toString()}`,
+    );
+    return response.data;
+  },
+
+  getStudent: async (id: string): Promise<StudentDetail> => {
+    const response = await apiClient.get<StudentDetail>(
+      API_ENDPOINTS.ADMIN_STUDENT_DETAIL(id),
+    );
+    return response.data;
+  },
+
+  getAnalytics: async (days = 30): Promise<AnalyticsResponse> => {
+    const response = await apiClient.get<AnalyticsResponse>(
+      `${API_ENDPOINTS.ADMIN_ANALYTICS}?days=${days}`,
+    );
     return response.data;
   },
 };

@@ -18,22 +18,8 @@ export default function ProgressPage() {
   const pct = (val: number) => val * 100;
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <header className="border-b bg-white shadow-sm">
-        <div className="container py-4">
-          <button
-            onClick={() => router.back()}
-            className="mb-2 text-blue-600 hover:underline"
-          >
-            ← Back
-          </button>
-          <h1 className="text-2xl font-bold text-gray-900">Your Progress</h1>
-        </div>
-      </header>
-
-      {/* Content */}
-      <main className="container py-8">
+    <main className="container py-8">
+      <h1 className="text-2xl font-bold text-gray-900 mb-6">Your Progress</h1>
         {isLoading ? (
           <div className="flex-center">
             <div className="text-gray-600">Loading progress...</div>
@@ -165,7 +151,6 @@ export default function ProgressPage() {
             </button>
           </div>
         )}
-      </main>
-    </div>
+    </main>
   );
 }

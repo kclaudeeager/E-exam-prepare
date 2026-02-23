@@ -14,44 +14,51 @@ export default function Navbar() {
   const isAdmin = user.role === 'admin';
 
   const studentLinks = [
-    { href: ROUTES.DASHBOARD, label: 'Dashboard' },
-    { href: ROUTES.STUDENT_BROWSE, label: 'Exam Papers' },
-    { href: ROUTES.STUDENT_ASK_AI, label: '🤖 Ask AI' },
-    { href: ROUTES.STUDENT_PRACTICE, label: 'Practice' },
-    { href: ROUTES.STUDENT_PROGRESS, label: 'Progress' },
+    { href: ROUTES.DASHBOARD, label: 'Dashboard', icon: '🏠' },
+    { href: ROUTES.STUDENT_BROWSE, label: 'Exam Papers', icon: '📄' },
+    { href: ROUTES.STUDENT_ASK_AI, label: 'Ask AI', icon: '🤖' },
+    { href: ROUTES.STUDENT_PRACTICE, label: 'Practice', icon: '✏️' },
+    { href: ROUTES.STUDENT_ATTEMPTS, label: 'Attempts', icon: '📝' },
+    { href: ROUTES.STUDENT_PROGRESS, label: 'Progress', icon: '📊' },
   ];
 
   const adminLinks = [
-    { href: ROUTES.DASHBOARD, label: 'Dashboard' },
-    { href: ROUTES.ADMIN_DOCUMENTS, label: 'Documents' },
-    { href: ROUTES.ADMIN_STUDENTS, label: 'Students' },
-    { href: ROUTES.ADMIN_ANALYTICS, label: 'Analytics' },
+    { href: ROUTES.DASHBOARD, label: 'Dashboard', icon: '🏠' },
+    { href: ROUTES.ADMIN_DOCUMENTS, label: 'Documents', icon: '📁' },
+    { href: ROUTES.ADMIN_STUDENTS, label: 'Students', icon: '👥' },
+    { href: ROUTES.ADMIN_ANALYTICS, label: 'Analytics', icon: '📈' },
   ];
 
   const links = isAdmin ? adminLinks : studentLinks;
 
+  // Match sub-routes too (e.g. /student/attempts/123 → Attempts active)
+  const isActive = (href: string) =>
+    pathname === href ||
+    (href !== ROUTES.DASHBOARD && pathname.startsWith(href));
+
   return (
-    <header className="border-b bg-white shadow-sm sticky top-0 z-10">
-      <div className="container flex items-center justify-between py-3">
+    <header className="border-b bg-white shadow-sm sticky top-0 z-50">
+      <div className="mx-auto max-w-7xl flex items-center justify-between px-4 py-2.5">
         {/* Brand */}
-        <Link href={ROUTES.DASHBOARD} className="flex items-center gap-2">
-          <span className="text-xl font-bold text-blue-600">E-exam-prepare</span>
+        <Link href={ROUTES.DASHBOARD} className="flex items-center gap-2 shrink-0">
+          <span className="text-lg font-bold text-blue-600">📚 E-exam</span>
         </Link>
 
-        {/* Nav links */}
-        <nav className="hidden md:flex items-center gap-1">
-          {links.map(({ href, label }) => {
-            const active = pathname === href;
+        {/* Nav links — desktop */}
+        <nav className="hidden md:flex items-center gap-0.5">
+          {links.map(({ href, label, icon }) => {
+            const active = isActive(href);
             return (
               <Link
                 key={href}
                 href={href}
-                className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
                   active
                     ? 'bg-blue-50 text-blue-700'
                     : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
                 }`}
               >
+                <span className="text-base">{icon}</span>
                 {label}
               </Link>
             );
@@ -59,7 +66,7 @@ export default function Navbar() {
         </nav>
 
         {/* User info + logout */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 shrink-0">
           <div className="hidden sm:block text-right">
             <p className="text-sm font-medium text-gray-800 leading-tight">{user.full_name}</p>
             <span
@@ -81,20 +88,21 @@ export default function Navbar() {
         </div>
       </div>
 
-      {/* Mobile nav */}
-      <div className="md:hidden border-t px-4 py-2 flex gap-2 overflow-x-auto">
-        {links.map(({ href, label }) => {
-          const active = pathname === href;
+      {/* Mobile nav — scrollable */}
+      <div className="md:hidden border-t px-3 py-1.5 flex gap-1 overflow-x-auto scrollbar-hide">
+        {links.map(({ href, label, icon }) => {
+          const active = isActive(href);
           return (
             <Link
               key={href}
               href={href}
-              className={`shrink-0 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+              className={`shrink-0 flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
                 active
                   ? 'bg-blue-50 text-blue-700'
                   : 'text-gray-600 hover:bg-gray-100'
               }`}
             >
+              <span>{icon}</span>
               {label}
             </Link>
           );

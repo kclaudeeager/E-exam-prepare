@@ -65,6 +65,11 @@ export const API_ENDPOINTS = {
 
   // Health
   HEALTH: '/health',
+
+  // Admin
+  ADMIN_STUDENTS_LIST: '/api/admin/students',
+  ADMIN_STUDENT_DETAIL: (id: string) => `/api/admin/students/${id}`,
+  ADMIN_ANALYTICS: '/api/admin/analytics',
 };
 
 // ── Constants ────────────────────────────────────────────────────────────

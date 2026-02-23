@@ -26,14 +26,14 @@ class ChatMessageIn(BaseModel):
 
 class RAGQueryRequest(BaseModel):
     question: str
-    collection: str = "General"
+    collection: str  # Must be provided; no default
     top_k: int = 5
     chat_history: list[ChatMessageIn] | None = None
 
 
 class RAGRetrieveRequest(BaseModel):
     query: str
-    collection: str = "General"
+    collection: str  # Must be provided; no default
     top_k: int = 5
 
 

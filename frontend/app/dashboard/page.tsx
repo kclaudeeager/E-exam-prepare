@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/lib/hooks';
 import { ROUTES } from '@/config/constants';
-import Navbar from '@/components/Navbar';
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -39,9 +38,7 @@ export default function DashboardPage() {
   const isAdmin = user.role === 'admin';
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <Navbar />
-
+    <>
       {/* Content */}
       <main className="container py-8">
         {isStudent && (
@@ -156,6 +153,6 @@ export default function DashboardPage() {
           </div>
         )}
       </main>
-    </div>
+    </>
   );
 }

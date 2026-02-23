@@ -6,7 +6,7 @@ import { useAuth } from '@/lib/hooks';
 import { documentAPI } from '@/lib/api';
 import { DocumentRead } from '@/lib/types';
 import { EDUCATION_LEVELS, ROUTES } from '@/config/constants';
-import Navbar from '@/components/Navbar';
+
 
 const IN_PROGRESS: DocumentRead['ingestion_status'][] = ['pending', 'ingesting'];
 
@@ -139,9 +139,7 @@ export default function DocumentsPage() {
   const displayed = showArchived ? archived : active;
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <Navbar />
-
+    <>
       <main className="container py-8">
         <div className="grid gap-8 lg:grid-cols-3">
           {/* ── Upload Form ── */}
@@ -307,6 +305,6 @@ export default function DocumentsPage() {
           </div>
         </div>
       </main>
-    </div>
+    </>
   );
 }

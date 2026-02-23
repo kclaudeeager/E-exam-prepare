@@ -17,6 +17,7 @@ from app.api import (
     progress_router,
     rag_router,
     chat_router,
+    admin_router,
 )
 
 logging.basicConfig(
@@ -61,6 +62,7 @@ app.include_router(attempts_router, prefix="/api/attempts", tags=["Attempts"])
 app.include_router(progress_router, prefix="/api/progress", tags=["Progress"])
 app.include_router(rag_router, prefix="/api/rag", tags=["RAG"])
 app.include_router(chat_router, prefix="/api/chat", tags=["Chat"])
+app.include_router(admin_router, prefix="/api/admin", tags=["Admin"])
 
 
 @app.get("/")

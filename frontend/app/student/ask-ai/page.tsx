@@ -5,7 +5,6 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/lib/hooks';
 import { ragAPI, chatAPI, documentAPI, RAGQueryResponse } from '@/lib/api';
 import { DocumentRead, ChatSessionRead } from '@/lib/types';
-import Navbar from '@/components/Navbar';
 import { ROUTES } from '@/config/constants';
 
 interface Message {
@@ -25,9 +24,10 @@ function AskAIContent() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [collection, setCollection] = useState(searchParams.get('collection') || 'General');
+  const [collection, setCollection] = useState<string | null>(null);
   const [showSources, setShowSources] = useState<string | null>(null);
   const [availableCollections, setAvailableCollections] = useState<string[]>([]);
+  const [collectionsLoaded, setCollectionsLoaded] = useState(false);
 
   // Chat session state
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -37,7 +37,7 @@ function AskAIContent() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Build collection list from ingested documents
+  // Build collection list from ingested documents and set default
   useEffect(() => {
     documentAPI.list().then((docs: DocumentRead[]) => {
       const cols = Array.from(
@@ -48,22 +48,51 @@ function AskAIContent() {
         ),
       ).sort();
       setAvailableCollections(cols);
-    }).catch(() => {/* silent */});
-  }, []);
+      
+      // Default to first available collection, or use query param
+      const paramCol = searchParams.get('collection');
+      if (paramCol && cols.includes(paramCol)) {
+        setCollection(paramCol);
+      } else if (cols.length > 0) {
+        setCollection(cols[0]);
+      } else {
+        setCollection(null); // No collections available
+      }
+      setCollectionsLoaded(true);
+    }).catch(() => {
+      setCollectionsLoaded(true);
+      setCollection(null);
+    });
+  }, [searchParams]);
 
   // Load sessions list
   const loadSessions = useCallback(async () => {
     try {
-      const list = await chatAPI.listSessions(collection);
-      setSessions(list);
+      // Fetch sessions from all collections instead of just current one
+      const allSessions: ChatSessionRead[] = [];
+      for (const col of availableCollections) {
+        try {
+          const list = await chatAPI.listSessions(col);
+          allSessions.push(...list);
+        } catch {
+          // Skip collections that have no sessions
+        }
+      }
+      // Sort by most recent first
+      allSessions.sort((a, b) => 
+        new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+      );
+      setSessions(allSessions);
     } catch {
       /* silent */
     }
-  }, [collection]);
+  }, [availableCollections]);
 
   useEffect(() => {
-    if (authReady && user) loadSessions();
-  }, [authReady, user, loadSessions]);
+    if (authReady && user && collectionsLoaded && availableCollections.length > 0) {
+      loadSessions();
+    }
+  }, [authReady, user, collectionsLoaded, availableCollections, loadSessions]);
 
   useEffect(() => {
     const init = async () => {
@@ -83,10 +112,8 @@ function AskAIContent() {
 
   // Welcome message on init
   useEffect(() => {
-    const subject = searchParams.get('subject');
-    const col = searchParams.get('collection');
-    if (col) setCollection(col);
-    if (messages.length === 0) {
+    if (messages.length === 0 && collectionsLoaded) {
+      const subject = searchParams.get('subject');
       const welcomeContent = subject
         ? `Hi! I'm your AI tutor for **${subject}**. Ask me anything about this subject — exam questions, concepts, or solutions from past papers.`
         : `Hi! I'm your AI tutor. Ask me any exam question or topic and I'll explain it using the exam papers in our database.`;
@@ -95,7 +122,7 @@ function AskAIContent() {
       ]);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [collectionsLoaded]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -123,6 +150,7 @@ function AskAIContent() {
   // Create a new session if we don't have one
   const ensureSession = useCallback(async (): Promise<string> => {
     if (sessionId) return sessionId;
+    if (!collection) return ''; // No collection, can't create session
     try {
       const session = await chatAPI.createSession(collection);
       setSessionId(session.id);
@@ -134,7 +162,7 @@ function AskAIContent() {
 
   const handleSend = async () => {
     const question = input.trim();
-    if (!question || loading) return;
+    if (!question || loading || !collection) return;
 
     const userMsg: Message = {
       id: `user-${Date.now()}`,
@@ -250,9 +278,31 @@ function AskAIContent() {
     );
   }
 
+  // Show error if no collections available
+  if (collectionsLoaded && availableCollections.length === 0) {
+    return (
+      <div className="flex flex-1 flex-col">
+        <main className="container flex flex-1 flex-col py-6">
+          <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-6 text-center">
+            <p className="text-lg font-semibold text-yellow-900 mb-2">No Documents Available</p>
+            <p className="text-sm text-yellow-700 mb-4">
+              An admin needs to ingest exam documents before you can use Ask AI. 
+              Please ask your administrator to upload exam papers.
+            </p>
+            <button
+              onClick={() => router.push(ROUTES.DASHBOARD)}
+              className="inline-block rounded-lg bg-yellow-600 px-4 py-2 text-sm font-medium text-white hover:bg-yellow-700"
+            >
+              Back to Dashboard
+            </button>
+          </div>
+        </main>
+      </div>
+    );
+  }
+
   return (
-    <div className="flex min-h-screen flex-col bg-gray-50">
-      <Navbar />
+    <div className="flex flex-1 flex-col">
 
       <main className="container flex flex-1 flex-col py-6 gap-4">
         {/* Header row */}
@@ -285,22 +335,22 @@ function AskAIContent() {
               📝 History {sessions.length > 0 && `(${sessions.length})`}
             </button>
             {/* Collection selector */}
-            <label className="text-xs font-medium text-gray-600 shrink-0">Subject index:</label>
-            <select
-              value={collection}
-              onChange={(e) => { setCollection(e.target.value); handleNewChat(); }}
-              className="input py-1.5 text-sm"
-            >
-              {availableCollections.length === 0 ? (
-                <option value={collection}>{collection}</option>
-              ) : (
-                availableCollections.map((col) => (
-                  <option key={col} value={col}>
-                    {col.replace(/_/g, ' ')}
-                  </option>
-                ))
-              )}
-            </select>
+            {collectionsLoaded && availableCollections.length > 0 && (
+              <div className="flex items-center gap-2">
+                <label className="text-xs font-medium text-gray-600 shrink-0">Subject index:</label>
+                <select
+                  value={collection || ''}
+                  onChange={(e) => { setCollection(e.target.value); handleNewChat(); }}
+                  className="input py-1.5 text-sm"
+                >
+                  {availableCollections.map((col) => (
+                    <option key={col} value={col}>
+                      {col.replace(/_/g, ' ')}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
         </div>
 
