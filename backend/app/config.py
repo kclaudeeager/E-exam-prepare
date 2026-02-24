@@ -19,8 +19,8 @@ class Settings(BaseSettings):
     ENV: str = "development"
 
     # ── CORS ────────────────────────────────────────────────────────────
-    CORS_ORIGINS: List[str] = ["http://localhost:3000"]
-    ALLOWED_HOSTS: List[str] = ["localhost", "127.0.0.1"]
+    CORS_ORIGINS: List[str] = ["*"]
+    ALLOWED_HOSTS: List[str] = ["*"]
 
     # ── Database ────────────────────────────────────────────────────────
     DATABASE_URL: str = "postgresql+psycopg://exam_prep:exam_prep_dev@localhost:5432/exam_prep"

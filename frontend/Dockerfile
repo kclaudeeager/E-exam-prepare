@@ -14,7 +14,11 @@ COPY . .
 
 # Build-time env vars (override at build if needed)
 ENV NEXT_TELEMETRY_DISABLED=1
-ENV NEXT_PUBLIC_API_URL=http://localhost:8000
+# API_URL intentionally left empty — frontend uses Next.js rewrites to proxy /api/* to backend
+ENV NEXT_PUBLIC_API_URL=
+# Internal URL for server-side proxy (baked into rewrites at build time)
+ARG BACKEND_INTERNAL_URL=http://backend:8000
+ENV BACKEND_INTERNAL_URL=${BACKEND_INTERNAL_URL}
 
 RUN npm run build
 
