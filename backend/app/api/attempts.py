@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.post("/", response_model=AttemptRead, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=AttemptRead, status_code=status.HTTP_201_CREATED)
 def submit_attempt(
     body: AttemptSubmit,
     current_user: User = Depends(get_current_user),
@@ -181,7 +181,7 @@ def submit_attempt(
     )
 
 
-@router.get("/", response_model=list[AttemptRead])
+@router.get("", response_model=list[AttemptRead])
 def list_attempts(
     skip: int = 0,
     limit: int = 20,

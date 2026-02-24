@@ -39,6 +39,7 @@ app = FastAPI(
     description="Personalized exam preparation platform",
     version="0.1.0",
     lifespan=lifespan,
+    redirect_slashes=False,
 )
 
 # ── Middleware ─────────────────────────────────────────────────────────────────

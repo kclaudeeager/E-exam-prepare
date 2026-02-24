@@ -140,7 +140,7 @@ def upload_personal_document(
     return doc
 
 
-@router.get("/", response_model=list[DocumentRead])
+@router.get("", response_model=list[DocumentRead])
 def list_documents(
     subject: str | None = None,
     level: EducationLevel | None = None,

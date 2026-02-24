@@ -12,7 +12,7 @@ from app.schemas.progress import ProgressRead, TopicMetric
 router = APIRouter()
 
 
-@router.get("/", response_model=ProgressRead)
+@router.get("", response_model=ProgressRead)
 def get_progress(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
