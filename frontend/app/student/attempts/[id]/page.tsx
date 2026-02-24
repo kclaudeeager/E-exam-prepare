@@ -320,10 +320,7 @@ export default function AttemptDetailPage() {
     }
   };
 
-  if (!user) {
-    router.push(ROUTES.LOGIN);
-    return null;
-  }
+  if (!user) return null;
 
   if (loading) {
     return (

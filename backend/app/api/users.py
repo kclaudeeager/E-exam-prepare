@@ -7,12 +7,12 @@ from app.core.security import create_access_token, hash_password, verify_passwor
 from app.db.models import User, EducationLevelEnum
 from app.db.session import get_db
 from app.api.deps import get_current_user
-from app.schemas.user import UserCreate, UserLogin, UserRead, UserUpdate, Token
+from app.schemas.user import UserCreate, UserLogin, UserRead, UserUpdate, Token, AuthResponse
 
 router = APIRouter()
 
 
-@router.post("/register", response_model=UserRead, status_code=status.HTTP_201_CREATED)
+@router.post("/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
 def register(body: UserCreate, db: Session = Depends(get_db)):
     """Create a new student or admin account."""
     existing = db.query(User).filter(User.email == body.email).first()
@@ -36,12 +36,14 @@ def register(body: UserCreate, db: Session = Depends(get_db)):
     db.add(user)
     db.commit()
     db.refresh(user)
-    return user
+
+    token = create_access_token(data={"sub": str(user.id), "role": user.role.value})
+    return AuthResponse(access_token=token, user=UserRead.model_validate(user))
 
 
-@router.post("/login", response_model=Token)
+@router.post("/login", response_model=AuthResponse)
 def login(body: UserLogin, db: Session = Depends(get_db)):
-    """Authenticate and return a JWT access token."""
+    """Authenticate and return a JWT access token + user profile."""
     user = db.query(User).filter(User.email == body.email).first()
     if not user or not verify_password(body.password, user.hashed_password):
         raise HTTPException(
@@ -55,7 +57,7 @@ def login(body: UserLogin, db: Session = Depends(get_db)):
         )
 
     token = create_access_token(data={"sub": str(user.id), "role": user.role.value})
-    return Token(access_token=token)
+    return AuthResponse(access_token=token, user=UserRead.model_validate(user))
 
 
 @router.get("/me", response_model=UserRead)

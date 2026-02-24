@@ -23,10 +23,12 @@ COPY alembic/ alembic/
 # Copy application code
 COPY app/ app/
 COPY seed_db.py ./
+COPY start.sh ./
 
 # Create non-root user & own the workdir
 RUN useradd --create-home --shell /bin/bash appuser \
     && mkdir -p /app/uploads \
+    && chmod +x /app/start.sh \
     && chown -R appuser:appuser /app
 USER appuser
 
@@ -35,4 +37,4 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-CMD ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["/app/start.sh"]

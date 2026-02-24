@@ -1,6 +1,7 @@
 'use client';
 
 import Navbar from '@/components/Navbar';
+import AuthGuard from '@/components/AuthGuard';
 
 export default function StudentLayout({
   children,
@@ -8,9 +9,11 @@ export default function StudentLayout({
   children: React.ReactNode;
 }) {
   return (
-    <div className="min-h-screen bg-gray-50">
-      <Navbar />
-      {children}
-    </div>
+    <AuthGuard>
+      <div className="min-h-screen bg-gray-50">
+        <Navbar />
+        {children}
+      </div>
+    </AuthGuard>
   );
 }

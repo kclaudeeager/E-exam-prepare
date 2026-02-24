@@ -9,10 +9,7 @@ export default function ProgressPage() {
   const { user } = useAuth();
   const { progress, isLoading } = useProgress();
 
-  if (!user) {
-    router.push(ROUTES.LOGIN);
-    return null;
-  }
+  if (!user) return null;
 
   // Backend returns accuracy as 0-1 fraction; convert to percentage for display
   const pct = (val: number) => val * 100;

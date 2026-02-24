@@ -65,6 +65,7 @@ dev-all:
 # ── Docker ────────────────────────────────────────────────────────────────────
 
 docker-up:
+	docker compose down --remove-orphans
 	docker compose up -d
 	@echo "✅ Services started"
 	@echo "  Frontend:  http://localhost:3000"

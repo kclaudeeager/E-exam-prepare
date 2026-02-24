@@ -9,10 +9,7 @@ export default function AttemptsPage() {
   const { user } = useAuth();
   const { attempts, isLoading } = useAttempts();
 
-  if (!user) {
-    router.push(ROUTES.LOGIN);
-    return null;
-  }
+  if (!user) return null;
 
   return (
     <main className="container py-8">

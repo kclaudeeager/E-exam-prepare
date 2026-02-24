@@ -242,10 +242,7 @@ export default function QuizPage() {
     setAnswers((prev) => ({ ...prev, [questionId]: value }));
   };
 
-  if (!user) {
-    router.push(ROUTES.LOGIN);
-    return null;
-  }
+  if (!user) return null;
 
   if (loading) {
     return (

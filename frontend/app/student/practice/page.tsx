@@ -18,16 +18,18 @@ export default function PracticePage() {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    if (!user) return;
+    if (!user) {
+      router.push(ROUTES.LOGIN);
+      return;
+    }
     documentAPI
       .list()
       .then((docs) => setDocuments(docs.filter((d) => d.ingestion_status === 'completed')))
       .catch(() => setError('Failed to load exam papers'))
       .finally(() => setLoadingDocs(false));
-  }, [user]);
+  }, [user, router]);
 
   if (!user) {
-    router.push(ROUTES.LOGIN);
     return null;
   }
 

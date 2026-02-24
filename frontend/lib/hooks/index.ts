@@ -26,7 +26,7 @@ import { API_ENDPOINTS } from '@/config/constants';
 
 export const useAuth = () => {
   const router = useRouter();
-  const { user, isAuthenticated, isLoading, setUser, setLoading, logout, hasRole } = useAuthStore();
+  const { user, isAuthenticated, isLoading, hasHydrated, setUser, setLoading, logout, hasRole } = useAuthStore();
 
   const register = useCallback(
     async (data: UserCreate) => {
@@ -35,7 +35,7 @@ export const useAuth = () => {
         const response = await authAPI.register(data);
         apiClient.setToken(response.access_token);
         setUser(response.user);
-        router.push('/dashboard');
+        router.replace('/dashboard');
         return { success: true };
       } catch (error: any) {
         return {
@@ -56,7 +56,7 @@ export const useAuth = () => {
         const response = await authAPI.login(data);
         apiClient.setToken(response.access_token);
         setUser(response.user);
-        router.push('/dashboard');
+        router.replace('/dashboard');
         return { success: true };
       } catch (error: any) {
         return {
@@ -90,6 +90,7 @@ export const useAuth = () => {
     user,
     isAuthenticated,
     isLoading,
+    hasHydrated,
     register,
     login,
     logout: handleLogout,

@@ -5,6 +5,19 @@
 import axios, { AxiosError, AxiosInstance } from 'axios';
 import { API_URL, ACCESS_TOKEN_KEY } from '@/config/constants';
 
+// Lazy import to avoid circular dependency with stores
+let _clearAuthStore: (() => void) | null = null;
+function getClearAuthStore() {
+  if (!_clearAuthStore) {
+    // Dynamic import the store only when needed
+    const { useAuthStore } = require('@/lib/stores/auth');
+    _clearAuthStore = () => {
+      useAuthStore.getState().logout();
+    };
+  }
+  return _clearAuthStore;
+}
+
 class APIClient {
   private instance: AxiosInstance;
 
@@ -32,10 +45,13 @@ class APIClient {
     this.instance.interceptors.response.use(
       (response) => response,
       async (error: AxiosError) => {
-        // 401 Unauthorized → clear token and redirect to login
+        // 401 Unauthorized → clear token + auth store, then redirect
         if (error.response?.status === 401) {
           this.clearToken();
-          window.location.href = '/login';
+          try { getClearAuthStore()(); } catch {}
+          if (typeof window !== 'undefined') {
+            window.location.href = '/login';
+          }
         }
         return Promise.reject(error);
       },

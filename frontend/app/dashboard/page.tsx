@@ -1,13 +1,11 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/lib/hooks';
 import { ROUTES } from '@/config/constants';
 
 export default function DashboardPage() {
-  const router = useRouter();
   const { user, fetchCurrentUser, isAuthenticated } = useAuth();
   const [loading, setLoading] = useState(true);
 
@@ -29,10 +27,7 @@ export default function DashboardPage() {
     );
   }
 
-  if (!user) {
-    router.push(ROUTES.LOGIN);
-    return null;
-  }
+  if (!user) return null;
 
   const isStudent = user.role === 'student';
   const isAdmin = user.role === 'admin';
