@@ -110,7 +110,7 @@ export const useDocuments = (subject?: string, level?: string, swrConfig?: SWRCo
   const upload = useCallback(
     async (file: File, metadata: any) => {
       try {
-        const doc = await documentAPI.upload(file, metadata);
+        const doc = await documentAPI.uploadAdmin(file, metadata);
         await mutate();
         return { success: true, data: doc };
       } catch (error: any) {

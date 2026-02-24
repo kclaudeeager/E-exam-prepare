@@ -21,11 +21,12 @@ class EducationLevel(str, Enum):
 
 
 class QuizGenerateRequest(BaseModel):
-    """POST /api/quiz/generate"""
+    """POST /api/quiz/generate — now requires document selection."""
 
     mode: QuizMode
-    topics: list[str] | None = None
-    level: EducationLevel | None = None
+    document_id: uuid.UUID  # Required: which exam paper to practice from
+    subject: str  # Required: which subject area
+    topics: list[str] | None = None  # Optional: filter within subject
     difficulty: str = "medium"
     count: int = 15
 
@@ -54,6 +55,7 @@ class QuizRead(BaseModel):
     instructions: str | None = None
     questions: list[QuestionRead]
     question_count: int
+    document_id: uuid.UUID | None = None  # Track source document
     created_at: datetime
 
     model_config = {"from_attributes": True}

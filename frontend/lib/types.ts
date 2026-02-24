@@ -14,6 +14,7 @@ export interface UserCreate {
   email: string;
   password: string;
   full_name: string;
+  education_level?: EducationLevel;
 }
 
 export interface UserLogin {
@@ -26,7 +27,15 @@ export interface UserRead {
   email: string;
   full_name: string;
   role: Role;
+  education_level?: EducationLevel;
+  is_active: boolean;
+  subscribed_topics: string[];
   created_at: string;
+}
+
+export interface UserUpdate {
+  full_name?: string;
+  education_level?: EducationLevel;
 }
 
 export interface Token {
@@ -49,15 +58,37 @@ export interface DocumentCreate {
   instructions?: string;
 }
 
-export interface DocumentRead extends DocumentCreate {
+export interface DocumentRead {
   id: string;
   filename: string;
-  file_path: string;
+  subject: string;
+  level: string;
+  year: string;
+  uploaded_by: string;
   ingestion_status: IngestionStatus;
+  is_personal: boolean;
+  is_shared: boolean;
+  official_duration_minutes?: number;
   is_archived: boolean;
   archived_at: string | null;
   created_at: string;
-  uploaded_by: string;
+}
+
+export interface DocumentShareRequest {
+  student_ids: string[];
+}
+
+export interface DocumentShareResponse {
+  document_id: string;
+  shared_count: number;
+  shared_with: string[];
+  message: string;
+}
+
+export interface DocumentWithShareInfo extends DocumentRead {
+  shared_with_count: number;
+  can_share: boolean;
+  can_delete: boolean;
 }
 
 // ── Topics ────────────────────────────────────────────────────────────────
@@ -85,8 +116,9 @@ export interface QuestionRead {
 
 export interface QuizGenerateRequest {
   mode: QuizMode;
+  document_id: string;
+  subject: string;
   topics?: string[];
-  level?: EducationLevel;
   difficulty?: string;
   count?: number;
 }
@@ -98,6 +130,7 @@ export interface QuizRead {
   instructions?: string;
   questions: QuestionRead[];
   question_count: number;
+  document_id?: string;
   created_at: string;
 }
 
@@ -244,6 +277,53 @@ export interface AnalyticsResponse {
   trends: TrendPoint[];
   topic_stats: TopicStat[];
   recent_attempts: RecentAttempt[];
+}
+
+// ── Admin Performance Analytics ───────────────────────────────────────────
+
+export interface WeakTopicEntry {
+  topic_name: string;
+  accuracy: number;
+  attempt_count: number;
+}
+
+export interface StrongTopicEntry {
+  topic_name: string;
+  accuracy: number;
+  attempt_count: number;
+}
+
+export interface StudentAttemptWithDoc {
+  id: string;
+  score: number;
+  total: number;
+  percentage: number;
+  document_name?: string;
+  started_at: string;
+  submitted_at: string | null;
+}
+
+export interface StudentPerformanceTrend {
+  student_id: string;
+  student_name: string;
+  overall_accuracy: number;
+  attempt_count: number;
+  weak_topics: WeakTopicEntry[];
+  strong_topics: StrongTopicEntry[];
+  recent_attempts: StudentAttemptWithDoc[];
+  last_attempted_at: string | null;
+}
+
+export interface WeakTopicStudentEntry {
+  student_id: string;
+  student_name: string;
+  weak_topic_count: number;
+  weakest_topics: Array<{ topic_name: string; accuracy: number }>;
+}
+
+export interface WeakTopicsSummary {
+  students_needing_help: WeakTopicStudentEntry[];
+  total_students_with_weak_topics: number;
 }
 
 // ── API Responses ──────────────────────────────────────────────────────────

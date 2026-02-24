@@ -41,8 +41,22 @@ class StudentAttemptSummary(BaseModel):
     score: int
     total: int
     percentage: float
+    document_name: str | None = None  # Source exam paper
     started_at: datetime
     submitted_at: datetime | None = None
+
+
+class StudentPerformanceTrend(BaseModel):
+    """Performance metrics over time for a single student."""
+
+    student_id: uuid.UUID
+    student_name: str
+    overall_accuracy: float
+    attempt_count: int
+    weak_topics: list[dict] = []  # [{topic_name, accuracy, attempt_count}, ...]
+    strong_topics: list[dict] = []
+    recent_attempts: list[StudentAttemptSummary] = []
+    last_attempted_at: datetime | None = None
 
 
 # ── System analytics ─────────────────────────────────────────────────────────

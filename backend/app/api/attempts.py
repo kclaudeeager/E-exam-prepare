@@ -34,7 +34,13 @@ def submit_attempt(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Submit answers for a quiz and receive graded results."""
+    """Submit answers for a quiz and receive graded results.
+    
+    This endpoint:
+    1. Grades all answers
+    2. Tracks the source document (if provided)
+    3. Updates per-topic progress metrics for personalized learning
+    """
     quiz = db.query(Quiz).filter(Quiz.id == body.quiz_id).first()
     if not quiz:
         raise HTTPException(
@@ -52,10 +58,18 @@ def submit_attempt(
         qq.question_id: qq.question for qq in qq_rows
     }
 
+    # Determine source document from first question if available
+    source_document_id = None
+    if question_map:
+        first_question = next(iter(question_map.values()))
+        if first_question.document_id:
+            source_document_id = first_question.document_id
+
     # ── Grade answers ────────────────────────────────────────────────────
     attempt = Attempt(
         quiz_id=quiz.id,
         student_id=current_user.id,
+        document_id=source_document_id,  # Track source document
         total=len(question_map),
         submitted_at=datetime.now(timezone.utc),
     )
@@ -87,7 +101,7 @@ def submit_attempt(
             )
         )
 
-        # Accumulate per‑topic
+        # Accumulate per‑topic for progress tracking
         topic_name = question.topic.name if question.topic else "General"
         bucket = topic_tallies.setdefault(
             topic_name, {"correct": 0, "total": 0, "topic_id": question.topic_id}
@@ -102,6 +116,7 @@ def submit_attempt(
     )
 
     # ── Update per‑topic Progress rows ───────────────────────────────────
+    # This enables the system to identify weak topics for adaptive learning
     for topic_name, tally in topic_tallies.items():
         if tally["topic_id"] is None:
             continue

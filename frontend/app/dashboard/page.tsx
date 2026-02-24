@@ -43,7 +43,24 @@ export default function DashboardPage() {
       <main className="container py-8">
         {isStudent && (
           <div className="space-y-6">
-            <h2 className="text-xl font-bold text-gray-900">Student Dashboard</h2>
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+              <h2 className="text-xl font-bold text-gray-900">Student Dashboard</h2>
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-gray-500">Level:</span>
+                {user.education_level ? (
+                  <span className="rounded-full bg-green-100 px-3 py-0.5 text-sm font-semibold text-green-700">
+                    {user.education_level}
+                  </span>
+                ) : (
+                  <Link
+                    href={ROUTES.STUDENT_PROFILE}
+                    className="rounded-full bg-yellow-100 px-3 py-0.5 text-sm font-semibold text-yellow-700 hover:bg-yellow-200 transition-colors"
+                  >
+                    ⚠️ Set your level →
+                  </Link>
+                )}
+              </div>
+            </div>
 
             <div className="grid gap-4 md:grid-cols-3">
               <Link href={ROUTES.STUDENT_BROWSE}>
@@ -54,6 +71,18 @@ export default function DashboardPage() {
                       <p className="text-sm text-gray-600">Browse past exam papers</p>
                     </div>
                     <div className="text-3xl">📄</div>
+                  </div>
+                </div>
+              </Link>
+
+              <Link href={ROUTES.STUDENT_DOCUMENTS}>
+                <div className="card cursor-pointer hover:shadow-md border-indigo-100">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="font-semibold text-gray-900">My Documents</h3>
+                      <p className="text-sm text-gray-600">Upload &amp; manage your materials</p>
+                    </div>
+                    <div className="text-3xl">📂</div>
                   </div>
                 </div>
               </Link>
@@ -102,6 +131,18 @@ export default function DashboardPage() {
                       <p className="text-sm text-gray-600">Review your quiz history</p>
                     </div>
                     <div className="text-3xl">📚</div>
+                  </div>
+                </div>
+              </Link>
+
+              <Link href={ROUTES.STUDENT_PROFILE}>
+                <div className="card cursor-pointer hover:shadow-md border-gray-100">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="font-semibold text-gray-900">My Profile</h3>
+                      <p className="text-sm text-gray-600">View and edit your details</p>
+                    </div>
+                    <div className="text-3xl">👤</div>
                   </div>
                 </div>
               </Link>

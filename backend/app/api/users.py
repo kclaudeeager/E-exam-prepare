@@ -4,10 +4,10 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.security import create_access_token, hash_password, verify_password
-from app.db.models import User
+from app.db.models import User, EducationLevelEnum
 from app.db.session import get_db
 from app.api.deps import get_current_user
-from app.schemas.user import UserCreate, UserLogin, UserRead, Token
+from app.schemas.user import UserCreate, UserLogin, UserRead, UserUpdate, Token
 
 router = APIRouter()
 
@@ -27,6 +27,11 @@ def register(body: UserCreate, db: Session = Depends(get_db)):
         hashed_password=hash_password(body.password),
         full_name=body.full_name,
         role=body.role,
+        education_level=(
+            EducationLevelEnum(body.education_level.value)
+            if body.education_level
+            else None
+        ),
     )
     db.add(user)
     db.commit()
@@ -56,4 +61,20 @@ def login(body: UserLogin, db: Session = Depends(get_db)):
 @router.get("/me", response_model=UserRead)
 def me(current_user: User = Depends(get_current_user)):
     """Return the authenticated user's profile."""
+    return current_user
+
+
+@router.patch("/me", response_model=UserRead)
+def update_profile(
+    body: UserUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Update the authenticated user's profile (full_name, education_level)."""
+    if body.full_name is not None:
+        current_user.full_name = body.full_name
+    if body.education_level is not None:
+        current_user.education_level = EducationLevelEnum(body.education_level.value)
+    db.commit()
+    db.refresh(current_user)
     return current_user

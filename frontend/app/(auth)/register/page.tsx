@@ -4,7 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/lib/hooks';
 import { UserCreate } from '@/lib/types';
-import { ROUTES } from '@/config/constants';
+import { ROUTES, EDUCATION_LEVELS } from '@/config/constants';
 
 export default function RegisterPage() {
   const { register, isLoading } = useAuth();
@@ -12,12 +12,13 @@ export default function RegisterPage() {
     email: '',
     password: '',
     full_name: '',
+    education_level: undefined,
   });
   const [error, setError] = useState<string>('');
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
+    setFormData((prev) => ({ ...prev, [name]: value || undefined }));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -90,6 +91,25 @@ export default function RegisterPage() {
               disabled={isLoading}
               className="mt-1 w-full"
             />
+          </div>
+
+          <div>
+            <label htmlFor="education_level" className="block text-sm font-medium text-gray-700">
+              Education Level
+            </label>
+            <select
+              id="education_level"
+              name="education_level"
+              value={formData.education_level || ''}
+              onChange={handleChange}
+              disabled={isLoading}
+              className="mt-1 w-full"
+            >
+              <option value="">Select your level (optional)</option>
+              {EDUCATION_LEVELS.map((l) => (
+                <option key={l.value} value={l.value}>{l.label}</option>
+              ))}
+            </select>
           </div>
 
           {error && (

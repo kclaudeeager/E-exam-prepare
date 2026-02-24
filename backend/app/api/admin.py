@@ -25,6 +25,7 @@ from app.schemas.admin import (
     RecentAttempt,
     StudentAttemptSummary,
     StudentDetail,
+    StudentPerformanceTrend,
     StudentSummary,
     SubjectStat,
     SystemOverview,
@@ -334,3 +335,174 @@ def get_analytics(
         topic_stats=topic_stats,
         recent_attempts=recent_attempts,
     )
+
+
+# ── 4. Student Performance Analytics (Personalized Learning Insights) ──────────
+
+
+@router.get("/students/{student_id}/performance", response_model=StudentPerformanceTrend)
+def get_student_performance(
+    student_id: str,
+    db: Session = Depends(get_db),
+    _current_user: User = Depends(require_admin),
+):
+    """Get detailed performance metrics for a single student.
+    
+    Returns:
+    - Overall accuracy and attempt count
+    - Weak topics (accuracy < WEAK_TOPIC_THRESHOLD)
+    - Strong topics (high accuracy)
+    - Recent attempts with document sources
+    - Learning trajectory
+    
+    Used by admins to identify students needing intervention.
+    """
+    import uuid as _uuid
+
+    try:
+        student_uuid = _uuid.UUID(student_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid student ID"
+        )
+
+    student = db.query(User).filter(User.id == student_uuid).first()
+    if not student:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Student not found"
+        )
+
+    # Overall accuracy
+    student_progress = (
+        db.query(Progress).filter(Progress.student_id == student_uuid).all()
+    )
+    overall_accuracy = 0.0
+    if student_progress:
+        total_correct = sum(p.total_correct for p in student_progress)
+        total_questions = sum(p.total_questions for p in student_progress)
+        overall_accuracy = (
+            round(total_correct / total_questions, 4) if total_questions else 0.0
+        )
+
+    # Attempt count
+    attempt_count = (
+        db.query(Attempt).filter(Attempt.student_id == student_uuid).count()
+    )
+
+    # Weak topics (accuracy < threshold)
+    weak_topics_data = [
+        {
+            "topic_name": p.topic.name if p.topic else "Unknown",
+            "accuracy": round(p.accuracy, 4),
+            "attempt_count": p.attempt_count,
+        }
+        for p in student_progress
+        if p.accuracy < settings.WEAK_TOPIC_THRESHOLD
+    ]
+    weak_topics_data.sort(key=lambda x: x["accuracy"])  # Sort by ascending accuracy
+
+    # Strong topics (accuracy >= 80%)
+    strong_topics_data = [
+        {
+            "topic_name": p.topic.name if p.topic else "Unknown",
+            "accuracy": round(p.accuracy, 4),
+            "attempt_count": p.attempt_count,
+        }
+        for p in student_progress
+        if p.accuracy >= 0.80
+    ]
+    strong_topics_data.sort(key=lambda x: x["accuracy"], reverse=True)
+
+    # Recent attempts with document source
+    recent_attempts_rows = (
+        db.query(Attempt, Document.filename)
+        .outerjoin(Document, Attempt.document_id == Document.id)
+        .filter(Attempt.student_id == student_uuid)
+        .order_by(Attempt.submitted_at.desc())
+        .limit(10)
+        .all()
+    )
+    recent_attempts = [
+        StudentAttemptSummary(
+            id=a.id,
+            score=a.score,
+            total=a.total,
+            percentage=a.percentage,
+            document_name=doc_name,
+            started_at=a.started_at,
+            submitted_at=a.submitted_at,
+        )
+        for a, doc_name in recent_attempts_rows
+    ]
+
+    # Last attempted date
+    last_attempt = (
+        db.query(Attempt)
+        .filter(Attempt.student_id == student_uuid)
+        .order_by(Attempt.submitted_at.desc())
+        .first()
+    )
+    last_attempted_at = last_attempt.submitted_at if last_attempt else None
+
+    return StudentPerformanceTrend(
+        student_id=student_uuid,
+        student_name=student.full_name,
+        overall_accuracy=overall_accuracy,
+        attempt_count=attempt_count,
+        weak_topics=weak_topics_data,
+        strong_topics=strong_topics_data,
+        recent_attempts=recent_attempts,
+        last_attempted_at=last_attempted_at,
+    )
+
+
+@router.get("/students/weak-topics/summary")
+def get_weak_topics_summary(
+    db: Session = Depends(get_db),
+    _current_user: User = Depends(require_admin),
+):
+    """Get a summary of students with weak topics across the platform.
+    
+    Returns list of students sorted by urgency (lowest accuracy topics first).
+    Used to identify students who need personalized intervention.
+    """
+    from app.schemas.admin import StudentPerformanceTrend
+
+    # Get all students with weak topics
+    weak_progress = (
+        db.query(Progress, User.full_name, User.id)
+        .join(User, Progress.student_id == User.id)
+        .filter(Progress.accuracy < settings.WEAK_TOPIC_THRESHOLD)
+        .order_by(Progress.accuracy.asc())
+        .all()
+    )
+
+    results = {}
+    for progress, student_name, student_id in weak_progress:
+        if student_id not in results:
+            results[student_id] = {
+                "student_name": student_name,
+                "weak_topics": [],
+            }
+        if progress.topic:
+            results[student_id]["weak_topics"].append(
+                {
+                    "topic_name": progress.topic.name,
+                    "accuracy": round(progress.accuracy, 4),
+                }
+            )
+
+    return {
+        "students_needing_help": [
+            {
+                "student_id": sid,
+                "student_name": data["student_name"],
+                "weak_topic_count": len(data["weak_topics"]),
+                "weakest_topics": sorted(
+                    data["weak_topics"], key=lambda x: x["accuracy"]
+                )[:3],
+            }
+            for sid, data in results.items()
+        ],
+        "total_students_with_weak_topics": len(results),
+    }

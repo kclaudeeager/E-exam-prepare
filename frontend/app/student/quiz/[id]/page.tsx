@@ -67,12 +67,10 @@ function CountdownTimer({
 function ResultsView({
   result,
   quiz,
-  answers,
   onBack,
 }: {
   result: AttemptRead;
   quiz: QuizRead;
-  answers: Record<string, string>;
   onBack: () => void;
 }) {
   const router = useRouter();
@@ -92,6 +90,13 @@ function ResultsView({
         >
           {result.percentage.toFixed(0)}%
         </div>
+        <p className="mb-1 text-sm font-medium uppercase tracking-wide text-blue-600">
+          {quiz.mode === 'real-exam'
+            ? '📝 Real Exam'
+            : quiz.mode === 'adaptive'
+              ? '🎯 Adaptive Practice'
+              : '📚 Topic Practice'}
+        </p>
         <h2 className="text-2xl font-bold text-gray-900">Quiz Complete!</h2>
         <p className="mt-2 text-gray-600">
           You got <span className="font-semibold">{result.score}</span> out of{' '}
@@ -284,7 +289,6 @@ export default function QuizPage() {
           <ResultsView
             result={result}
             quiz={quiz}
-            answers={answers}
             onBack={() => router.push(ROUTES.STUDENT_PRACTICE)}
           />
         </main>

@@ -8,10 +8,12 @@ import { API_ENDPOINTS } from '@/config/constants';
 import {
   UserCreate,
   UserLogin,
+  UserUpdate,
   AuthResponse,
   UserRead,
-  DocumentCreate,
   DocumentRead,
+  DocumentShareRequest,
+  DocumentShareResponse,
   QuizGenerateRequest,
   QuizRead,
   AttemptSubmit,
@@ -25,6 +27,8 @@ import {
   StudentSummary,
   StudentDetail,
   AnalyticsResponse,
+  StudentPerformanceTrend,
+  WeakTopicsSummary,
 } from '@/lib/types';
 
 // ── Auth ───────────────────────────────────────────────────────────────────
@@ -51,6 +55,14 @@ export const authAPI = {
     return response.data;
   },
 
+  updateProfile: async (data: UserUpdate) => {
+    const response = await apiClient.patch<UserRead>(
+      API_ENDPOINTS.UPDATE_ME,
+      data,
+    );
+    return response.data;
+  },
+
   logout: () => {
     apiClient.clearToken();
   },
@@ -58,60 +70,87 @@ export const authAPI = {
 
 // ── Documents ──────────────────────────────────────────────────────────────
 
-export const documentAPI = {
-  upload: async (file: File, metadata: Omit<DocumentCreate, 'level'> & { level: string }) => {
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('subject', metadata.subject);
-    formData.append('level', metadata.level);
-    formData.append('year', metadata.year);
-    if (metadata.official_duration_minutes) {
-      formData.append('official_duration_minutes', String(metadata.official_duration_minutes));
-    }
-    if (metadata.instructions) {
-      formData.append('instructions', metadata.instructions);
-    }
+type DocUploadMeta = {
+  subject: string;
+  level: string;
+  year: string;
+  official_duration_minutes?: number;
+  instructions?: string;
+};
 
+function buildDocFormData(file: File, metadata: DocUploadMeta): FormData {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('subject', metadata.subject);
+  formData.append('level', metadata.level);
+  formData.append('year', metadata.year);
+  if (metadata.official_duration_minutes) {
+    formData.append('official_duration_minutes', String(metadata.official_duration_minutes));
+  }
+  if (metadata.instructions) {
+    formData.append('instructions', metadata.instructions);
+  }
+  return formData;
+}
+
+export const documentAPI = {
+  /** Admin: upload a level-designated exam paper */
+  uploadAdmin: async (file: File, metadata: DocUploadMeta): Promise<DocumentRead> => {
     const response = await apiClient.postFormData<DocumentRead>(
-      API_ENDPOINTS.DOCUMENTS,
-      formData,
+      API_ENDPOINTS.DOCUMENTS_ADMIN,
+      buildDocFormData(file, metadata),
     );
     return response.data;
   },
 
-  list: async (subject?: string, level?: string, skip = 0, limit = 50, includeArchived = false) => {
+  /** Student: upload a personal document */
+  uploadStudent: async (file: File, metadata: DocUploadMeta): Promise<DocumentRead> => {
+    const response = await apiClient.postFormData<DocumentRead>(
+      API_ENDPOINTS.DOCUMENTS_STUDENT,
+      buildDocFormData(file, metadata),
+    );
+    return response.data;
+  },
+
+  list: async (subject?: string, level?: string, skip = 0, limit = 50, includeArchived = false): Promise<DocumentRead[]> => {
     const params = new URLSearchParams();
     if (subject) params.append('subject', subject);
     if (level) params.append('level', level);
     params.append('skip', String(skip));
     params.append('limit', String(limit));
     if (includeArchived) params.append('include_archived', 'true');
-
     const response = await apiClient.get<DocumentRead[]>(
       `${API_ENDPOINTS.DOCUMENTS}?${params.toString()}`,
     );
     return response.data;
   },
 
-  get: async (id: string) => {
-    const response = await apiClient.get<DocumentRead>(
-      API_ENDPOINTS.DOCUMENT_DETAIL(id),
+  get: async (id: string): Promise<DocumentRead> => {
+    const response = await apiClient.get<DocumentRead>(API_ENDPOINTS.DOCUMENT_DETAIL(id));
+    return response.data;
+  },
+
+  archive: async (id: string): Promise<DocumentRead> => {
+    const response = await apiClient.patch<DocumentRead>(`${API_ENDPOINTS.DOCUMENT_DETAIL(id)}/archive`);
+    return response.data;
+  },
+
+  restore: async (id: string): Promise<DocumentRead> => {
+    const response = await apiClient.patch<DocumentRead>(`${API_ENDPOINTS.DOCUMENT_DETAIL(id)}/restore`);
+    return response.data;
+  },
+
+  share: async (id: string, studentIds: string[]): Promise<DocumentShareResponse> => {
+    const body: DocumentShareRequest = { student_ids: studentIds };
+    const response = await apiClient.post<DocumentShareResponse>(
+      API_ENDPOINTS.DOCUMENT_SHARE(id),
+      body,
     );
     return response.data;
   },
 
-  archive: async (id: string) => {
-    const response = await apiClient.patch<DocumentRead>(
-      `${API_ENDPOINTS.DOCUMENT_DETAIL(id)}/archive`,
-    );
-    return response.data;
-  },
-
-  restore: async (id: string) => {
-    const response = await apiClient.patch<DocumentRead>(
-      `${API_ENDPOINTS.DOCUMENT_DETAIL(id)}/restore`,
-    );
-    return response.data;
+  unshare: async (docId: string, studentId: string): Promise<void> => {
+    await apiClient.delete(API_ENDPOINTS.DOCUMENT_UNSHARE(docId, studentId));
   },
 };
 
@@ -306,6 +345,20 @@ export const adminAPI = {
   getAnalytics: async (days = 30): Promise<AnalyticsResponse> => {
     const response = await apiClient.get<AnalyticsResponse>(
       `${API_ENDPOINTS.ADMIN_ANALYTICS}?days=${days}`,
+    );
+    return response.data;
+  },
+
+  getStudentPerformance: async (id: string): Promise<StudentPerformanceTrend> => {
+    const response = await apiClient.get<StudentPerformanceTrend>(
+      API_ENDPOINTS.ADMIN_STUDENT_PERFORMANCE(id),
+    );
+    return response.data;
+  },
+
+  getWeakTopicsSummary: async (): Promise<WeakTopicsSummary> => {
+    const response = await apiClient.get<WeakTopicsSummary>(
+      API_ENDPOINTS.ADMIN_WEAK_TOPICS,
     );
     return response.data;
   },

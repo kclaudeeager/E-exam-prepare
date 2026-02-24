@@ -89,7 +89,7 @@ export default function DocumentsPage() {
 
     setUploading(true);
     try {
-      await documentAPI.upload(file, {
+      await documentAPI.uploadAdmin(file, {
         subject,
         level,
         year,

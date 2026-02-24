@@ -21,6 +21,8 @@ export const ROUTES = {
   STUDENT_ATTEMPT_DETAIL: (id: string) => `/student/attempts/${id}`,
   STUDENT_BROWSE: '/student/browse',
   STUDENT_ASK_AI: '/student/ask-ai',
+  STUDENT_DOCUMENTS: '/student/documents',
+  STUDENT_PROFILE: '/student/profile',
 
   // Admin routes
   ADMIN_DOCUMENTS: '/admin/documents',
@@ -35,6 +37,7 @@ export const API_ENDPOINTS = {
   REGISTER: '/api/users/register',
   LOGIN: '/api/users/login',
   ME: '/api/users/me',
+  UPDATE_ME: '/api/users/me',
 
   // Documents
   DOCUMENTS: '/api/documents/',
@@ -70,6 +73,14 @@ export const API_ENDPOINTS = {
   ADMIN_STUDENTS_LIST: '/api/admin/students',
   ADMIN_STUDENT_DETAIL: (id: string) => `/api/admin/students/${id}`,
   ADMIN_ANALYTICS: '/api/admin/analytics',
+  ADMIN_STUDENT_PERFORMANCE: (id: string) => `/api/admin/students/${id}/performance`,
+  ADMIN_WEAK_TOPICS: '/api/admin/students/weak-topics/summary',
+
+  // Documents (split into admin and student upload endpoints)
+  DOCUMENTS_ADMIN: '/api/documents/admin',
+  DOCUMENTS_STUDENT: '/api/documents/student',
+  DOCUMENT_SHARE: (id: string) => `/api/documents/${id}/share`,
+  DOCUMENT_UNSHARE: (docId: string, studentId: string) => `/api/documents/${docId}/share/${studentId}`,
 };
 
 // ── Constants ────────────────────────────────────────────────────────────

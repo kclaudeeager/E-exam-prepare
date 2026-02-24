@@ -41,7 +41,8 @@ def ingest_document(self, document_id: str, file_path: str) -> dict:
         )
         logger.info("RAG ingestion complete for %s → %s", document_id, result)
 
-        # 3. Success
+        # 3. Success — persist the collection name so quiz generation can find it
+        doc.collection_name = collection
         doc.ingestion_status = IngestionStatusEnum.COMPLETED
         db.commit()
 

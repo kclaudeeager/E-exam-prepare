@@ -96,6 +96,10 @@ class User(Base):
         Enum(RoleEnum, name="role_enum"), default=RoleEnum.STUDENT
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    education_level: Mapped[EducationLevelEnum | None] = mapped_column(
+        Enum(EducationLevelEnum, name="education_level_enum", create_constraint=False),
+        nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow
     )
@@ -113,6 +117,12 @@ class User(Base):
     )
     chat_sessions: Mapped[list["ChatSession"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
+    )
+    uploaded_documents: Mapped[list["Document"]] = relationship(
+        back_populates="uploader", foreign_keys="Document.uploaded_by"
+    )
+    shared_documents: Mapped[list["DocumentShare"]] = relationship(
+        back_populates="shared_with_user", cascade="all, delete-orphan"
     )
 
 
@@ -162,6 +172,8 @@ class Document(Base):
     )
     instructions: Mapped[str | None] = mapped_column(Text, nullable=True)
     marking_scheme: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_personal: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    is_shared: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     ingestion_status: Mapped[IngestionStatusEnum] = mapped_column(
         Enum(IngestionStatusEnum, name="ingestion_status_enum"),
         default=IngestionStatusEnum.PENDING,
@@ -179,9 +191,39 @@ class Document(Base):
         DateTime(timezone=True), default=_utcnow
     )
 
-    uploader: Mapped["User"] = relationship("User")
+    uploader: Mapped["User"] = relationship("User", back_populates="uploaded_documents")
     questions: Mapped[list["Question"]] = relationship(
         back_populates="source_document", cascade="all, delete-orphan"
+    )
+    shared_with: Mapped[list["DocumentShare"]] = relationship(
+        back_populates="document", cascade="all, delete-orphan"
+    )
+
+
+# ── Document Sharing (personal document sharing between students) ──────────────
+
+
+class DocumentShare(Base):
+    __tablename__ = "document_shares"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=_uuid
+    )
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("documents.id")
+    )
+    shared_with_user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow
+    )
+
+    document: Mapped["Document"] = relationship(back_populates="shared_with")
+    shared_with_user: Mapped["User"] = relationship(back_populates="shared_documents")
+
+    __table_args__ = (
+        UniqueConstraint("document_id", "shared_with_user_id", name="uq_document_share"),
     )
 
 
@@ -334,6 +376,9 @@ class Attempt(Base):
     )
     student_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id")
+    )
+    document_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("documents.id"), nullable=True
     )
     score: Mapped[int] = mapped_column(Integer, default=0)
     total: Mapped[int] = mapped_column(Integer, default=0)
