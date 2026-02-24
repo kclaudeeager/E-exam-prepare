@@ -7,8 +7,8 @@ Personalized exam preparation platform powered by **RAG** (Retrieval-Augmented G
 | Layer | Technology |
 |-------|-----------|
 | Frontend | Next.js 14 · React 18 · TailwindCSS · TypeScript · Zustand · SWR |
-| Backend | FastAPI · SQLAlchemy · PostgreSQL · Celery + Redis |
-| RAG | LlamaIndex · OpenAI / Gemini · BM25 · PropertyGraph |
+| Backend | FastAPI · SQLAlchemy · PostgreSQL 16 · Celery + Redis |
+| RAG | LlamaIndex · Groq LLM (llama-3.3-70b) · FastEmbed (BAAI/bge-small-en-v1.5) |
 | Tooling | **uv** (Python) · npm (JS) · Docker Compose · Ruff |
 
 ## Quick start
@@ -37,9 +37,12 @@ make docker-up
 - RAG client HTTP integration
 
 ✅ **RAG Service**: Fully implemented
-- LlamaIndex with dual indexes (vector + PropertyGraph)
-- Hybrid retrieval (semantic + BM25 + reranking)
-- Support for OpenAI & Gemini LLMs
+- LlamaIndex with per-collection VectorStoreIndex
+- Groq LLM (llama-3.3-70b-versatile) for synthesis
+- FastEmbed (BAAI/bge-small-en-v1.5) for free local embeddings
+- Smart vague query expansion for first-time questions
+- Chat-aware condensation for follow-up questions
+- Support for Groq, OpenAI & Gemini LLMs
 
 ✅ **Frontend**: Fully implemented
 - 11 pages (auth, dashboard, student views, admin views)
@@ -55,47 +58,58 @@ make docker-up
 ```
 ├── pyproject.toml              ← uv workspace root (3 members)
 ├── .python-version             ← Python 3.12
+├── docker-compose.yml          ← 6 services (postgres, redis, backend, rag, celery, frontend)
+├── .env                        ← Root env (used by all Docker services)
+├── Makefile                    ← dev-all, docker-up, lint, test, etc.
+├── docs/                       ← All documentation (moved from root)
+│   ├── DOCS_INDEX.md           ← Documentation map
+│   ├── ARCHITECTURE.md         ← System design & data flows
+│   ├── SETUP_GUIDE.md          ← Quick start & environment reference
+│   ├── API_REFERENCE.md        ← Full REST API reference
+│   └── ... (15+ docs)
 ├── backend/
 │   ├── app/
-│   │   ├── main.py             ← FastAPI app (11 routes)
+│   │   ├── main.py             ← FastAPI app (11+ routes)
 │   │   ├── config.py           ← Pydantic Settings
 │   │   ├── celery_app.py       ← Celery worker config
 │   │   ├── tasks.py            ← ingest_document task
-│   │   ├── api/                ← 6 route handlers
+│   │   ├── api/                ← Route handlers (users, documents, quiz, rag, chat)
 │   │   ├── core/security.py    ← JWT + password hashing
 │   │   ├── db/                 ← SQLAlchemy models + session
-│   │   ├── schemas/            ← Pydantic request/response
+│   │   ├── schemas/            ← Pydantic request/response (AuthResponse, etc.)
 │   │   └── services/rag_client.py
 │   ├── alembic/                ← Database migrations
+│   ├── start.sh                ← Auto-migrate + start script (used in Docker)
 │   └── tests/
 ├── rag-service/
 │   └── app/
 │       ├── main.py             ← FastAPI app (4 routes)
-│       ├── config.py           ← Settings
-│       ├── routes/             ← ingest, retrieve, query, explore
-│       └── rag/engine.py       ← LlamaIndexRAGEngine
+│       ├── config.py           ← Settings (provider, models, chunking)
+│       ├── providers.py        ← LLM + embedding factory
+│       ├── routes/             ← ingest, retrieve, query
+│       └── rag/engine.py       ← LlamaIndexRAGEngine (singleton, per-collection)
 ├── frontend/
 │   ├── lib/
-│   │   ├── api/                ← Axios client + endpoints
+│   │   ├── api/                ← Axios client + endpoints (authAPI, ragAPI, chatAPI)
 │   │   ├── hooks/              ← useAuth, useDocuments, etc.
-│   │   ├── stores/auth.ts      ← Zustand state
+│   │   ├── stores/auth.ts      ← Zustand state (with hasHydrated)
 │   │   └── types.ts            ← TypeScript interfaces
 │   ├── config/constants.ts     ← Routes, API endpoints
+│   ├── components/
+│   │   ├── AuthGuard.tsx       ← Hydration-aware auth wrapper
+│   │   └── Navbar.tsx
 │   ├── app/                    ← Next.js App Router
 │   │   ├── (auth)/             ← Login + Register
 │   │   ├── dashboard/          ← Role-based dashboard
-│   │   ├── student/            ← Practice, Progress, Attempts
+│   │   ├── student/            ← Practice, Progress, Attempts, Ask AI
 │   │   ├── admin/              ← Documents, Students, Analytics
 │   │   ├── layout.tsx          ← Root + Providers
 │   │   └── page.tsx            ← Home page
 │   ├── tailwind.config.js
 │   ├── tsconfig.json
-│   ├── package.json
-│   ├── DEVELOPMENT.md          ← Frontend guide
-│   └── INTEGRATION.md          ← API integration docs
-├── verify_integration.py       ← Integration test
-├── docker-compose.yml
-├── Makefile
+│   └── package.json
+├── web-scrap/                  ← Exam paper scraper utility
+├── scripts/                    ← Admin scripts (reingest, reset, etc.)
 └── .github/copilot-instructions.md
 ```
 
@@ -181,10 +195,12 @@ python3 verify_integration.py
 ## Key architectural patterns
 
 ### Authentication Flow
-- User registers/logs in → JWT token stored in localStorage
+- User registers/logs in → Backend returns `AuthResponse { access_token, token_type, user }`
+- Token stored via `apiClient.setToken()`, user stored in Zustand
 - All requests include `Authorization: Bearer {token}`
-- 401 responses clear token + redirect to login
-- Zustand store persists auth state across page reloads
+- 401 responses → Axios interceptor clears Zustand store → redirect to login
+- **AuthGuard** component wraps protected layouts, waits for Zustand hydration (`hasHydrated`)
+- Zustand store uses `persist` middleware with `onRehydrateStorage` for SSR safety
 
 ### Data Fetching
 - All GET requests use SWR for automatic caching
@@ -269,10 +285,16 @@ python3 verify_integration.py
 
 ## Documentation
 
-- [**Frontend Development Guide**](frontend/DEVELOPMENT.md) — Setup, testing, deployment
-- [**Frontend Integration Guide**](frontend/INTEGRATION.md) — API flows, patterns, troubleshooting
-- [**Architecture Doc**](docs/ARCHITECTURE.md) — System design, data flows, RAG patterns
-- [**Copilot Instructions**](.github/copilot-instructions.md) — Project vision, patterns, onboarding
+All documentation lives in the [`docs/`](docs/) folder:
+
+- [**Setup Guide**](docs/SETUP_GUIDE.md) — Quick start, Docker, environment variables
+- [**Architecture**](docs/ARCHITECTURE.md) — System design, service topology, data flows
+- [**API Reference**](docs/API_REFERENCE.md) — Full REST API with examples
+- [**RAG Integration**](docs/RAG_INTEGRATION.md) — RAG service endpoints and query patterns
+- [**Frontend Development**](docs/DEVELOPMENT.md) — Frontend setup, structure, patterns
+- [**Frontend Integration**](docs/INTEGRATION.md) — API flows, patterns, troubleshooting
+- [**Provider Setup**](docs/PROVIDER_SETUP.md) — Switching between Groq, OpenAI, Gemini
+- [**Docs Index**](docs/DOCS_INDEX.md) — Full documentation map
 
 ## Deployment
 
@@ -289,13 +311,16 @@ docker compose -f docker-compose.yml up -d
 
 ### Environment Variables
 ```
-# .env (backend & rag)
-DATABASE_URL=postgresql+psycopg://user:pass@localhost:5432/exam_prep
-CELERY_BROKER_URL=redis://localhost:6379/0
-OPENAI_API_KEY=sk-...
-GOOGLE_API_KEY=...
+# .env (root — used by all Docker services)
+POSTGRES_USER=exam_prep
+POSTGRES_PASSWORD=exam_prep_dev
+POSTGRES_DB=exam_prep
 SECRET_KEY=your-secret-key
+LLAMA_INDEX_PROVIDER=groq
+GROQ_API_KEY=gsk_...
+NEXT_PUBLIC_API_URL=http://localhost:8000
 
-# frontend/.env.local
-NEXT_PUBLIC_API_URL=https://api.example.com
+# Optional
+OPENAI_API_KEY=sk-...    # For OpenAI embeddings (otherwise uses free local FastEmbed)
+GOOGLE_API_KEY=...       # For Gemini provider
 ```

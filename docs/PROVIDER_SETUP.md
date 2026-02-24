@@ -4,11 +4,13 @@
 
 The RAG service supports **3 LLM providers** during development:
 
-| Provider | LLM Model | Cost | Best For |
-|----------|-----------|------|----------|
-| **Groq** (Recommended) | Mixtral 8x7B | **FREE** ✅ | Development & Testing |
-| **Gemini** | Gemini 2.0 Flash | Free/Cheap | Development & Production |
-| **OpenAI** | GPT-4 | Paid | Production Use |
+| Provider | LLM Model | Embeddings | Cost | Best For |
+|----------|-----------|------------|------|----------|
+| **Groq** (Default) | llama-3.3-70b-versatile | FastEmbed (BAAI/bge-small-en-v1.5, local) | **FREE** ✅ | Development & Testing |
+| **Gemini** | Gemini 2.0 Flash | Custom Gemini embeddings | Free/Cheap | Development & Production |
+| **OpenAI** | GPT-4 | text-embedding-3-small | Paid | Production Use |
+
+> **Note**: When using Groq, embeddings use **FastEmbed** (local ONNX model, no API key needed). If `OPENAI_API_KEY` is set, OpenAI embeddings are used instead.
 
 ---
 
@@ -143,7 +145,7 @@ from app.llms import GroqLLM
 
 llm = GroqLLM(
     api_key="your_key",
-    model_name="mixtral-8x7b-32768",  # Free model
+    model_name="llama-3.3-70b-versatile",  # Default Groq model
     temperature=0.1,
     max_tokens=2048
 )

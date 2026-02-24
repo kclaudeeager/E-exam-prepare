@@ -70,26 +70,26 @@ python -c "from app.config import settings; print(f'Provider: {settings.LLAMA_IN
 
 ### Groq Models Available
 
-The RAG service uses **Mixtral 8x7B** by default:
+The RAG service uses **llama-3.3-70b-versatile** by default:
 
 ```python
-GROQ_MODEL = "mixtral-8x7b-32768"  # Default (free tier)
+GROQ_MODEL = "llama-3.3-70b-versatile"  # Default (free tier)
 ```
 
 Other available models:
-- `llama3-70b-8192` - Llama 3 (larger, slower but better quality)
-- `openai/gpt-4o-mini` - Through Groq's OpenAI gateway (paid)
+- `mixtral-8x7b-32768` - Mixtral (free, good quality)
+- `llama3-70b-8192` - Llama 3 (free, larger context)
 - See https://console.groq.com/docs/models for full list
 
 ### Embedding Strategy
 
 When using **Groq LLM**:
-- **LLM**: Mixtral 8x7B (free, via Groq)
-- **Embeddings**: OpenAI text-embedding-3-small (recommended) OR fall back to LlamaIndex defaults
-  - If `OPENAI_API_KEY` is set → uses OpenAI embeddings (best quality)
-  - If not set → logs warning, uses LlamaIndex defaults
+- **LLM**: llama-3.3-70b-versatile (free, via Groq)
+- **Embeddings**: FastEmbed BAAI/bge-small-en-v1.5 (free, local, ONNX-based, no API key)
+  - If `OPENAI_API_KEY` is set -> uses OpenAI text-embedding-3-small instead
+  - FastEmbed is the default and recommended for development
 
-**Recommendation**: Set `OPENAI_API_KEY` for consistent embeddings quality while keeping LLM free via Groq.
+**Recommendation**: FastEmbed works great out of the box with no API key. Optionally set `OPENAI_API_KEY` for higher-quality embeddings.
 
 ## Usage Examples
 

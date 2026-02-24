@@ -2,343 +2,351 @@
 
 ## System Overview
 
-E-exam-prepare is a three-tier application with clear separation of concerns:
+E-exam-prepare is a three-tier application with clear separation of concerns, fully containerised via Docker Compose.
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                     Next.js Frontend                             │
-│  (UI, routing, state mgmt with SWR/Zustand, auth with next-auth)│
-└────────────────────────┬────────────────────────────────────────┘
-                         │ HTTP REST API
-┌────────────────────────▼────────────────────────────────────────┐
-│                   FastAPI Backend                                │
-│  (Routes, user mgmt, quiz logic, attempt grading, progress)      │
-└─────────────┬──────────────────────────────┬────────────────────┘
-              │                              │
-              │ SQLAlchemy ORM              │ HTTP Client
-              │                             │
-    ┌─────────▼──────────┐      ┌──────────▼──────────────┐
-    │  PostgreSQL DB     │      │  RAG Service (Python)   │
-    │  (users, docs,     │      │  (LlamaIndex, LLM)      │
-    │   quizzes, score)  │      │                         │
-    └────────────────────┘      └─────────┬────────────────┘
-                                         │
-                    ┌────────────────────┼──────────────────┐
-                    │                    │                  │
-            ┌───────▼─────────┐  ┌──────▼────────┐  ┌──────▼────────┐
-            │ Vector Store    │  │  Graph Store  │  │  LLM API      │
-            │ (pgvector/      │  │  (Neo4j/      │  │  (OpenAI/     │
-            │  Pinecone)      │  │   Simple)     │  │   Google)     │
-            └─────────────────┘  └───────────────┘  └───────────────┘
++------------------------------------------------------------------+
+|                     Next.js Frontend                              |
+|  (UI, routing, Zustand state, AuthGuard, SWR data fetching)      |
++-----------------------------+------------------------------------+
+                              | HTTP REST
++-----------------------------v------------------------------------+
+|                   FastAPI Backend                                 |
+|  (Auth, documents, quiz, attempts, progress, RAG proxy, chat)    |
++--------------+--------------------------+-----------+------------+
+               |                          |           |
+   SQLAlchemy  |              HTTP Client |           | Celery
+               |                          |           |
+   +-----------v--------+   +------------v---+   +---v-----------+
+   | PostgreSQL 16      |   | RAG Service    |   | Celery Worker |
+   | (users, docs,      |   | (LlamaIndex,   |   | (async ingest |
+   |  quizzes, scores,  |   |  Groq LLM,     |   |  via RAG svc) |
+   |  progress)         |   |  FastEmbed)    |   |               |
+   +--------------------+   +-------+--------+   +---------------+
+                                    |
+                          +---------+---------+
+                          |                   |
+                   +------v------+   +--------v-------+
+                   | Groq API    |   | Local ONNX     |
+                   | (LLM)      |   | Embeddings     |
+                   | llama-3.3  |   | (FastEmbed     |
+                   | 70b        |   |  bge-small)    |
+                   +-------------+   +----------------+
 ```
+
+## Docker Compose Services
+
+All services are orchestrated via `docker-compose.yml`:
+
+| Service | Image / Build | Port | Purpose |
+|---------|--------------|------|---------|
+| **postgres** | `postgres:16-alpine` | 5432 | Relational database |
+| **redis** | `redis:7-alpine` | 6379 | Celery broker + result backend |
+| **backend** | `./backend/Dockerfile` | 8000 | FastAPI main API |
+| **rag-service** | `./rag-service/Dockerfile` | 8001 | RAG engine (LlamaIndex) |
+| **celery-worker** | `./backend/Dockerfile` | — | Async document ingestion |
+| **frontend** | `./frontend/Dockerfile` | 3000 | Next.js UI |
+
+### Shared Volumes
+- `backend_uploads` — mounted on **backend**, **rag-service**, and **celery-worker** so all three can read uploaded PDFs
+- `rag_storage` — mounted on **rag-service** and **celery-worker** for persisted vector indexes
+- `postgres_data` / `redis_data` — persistent data stores
+
+### Startup Order
+```
+postgres (healthy) + redis (healthy)
+  -> backend (runs alembic migrate on start via start.sh)
+  -> rag-service
+  -> celery-worker (depends on postgres + redis + rag-service)
+  -> frontend (depends on backend)
+```
+
+---
 
 ## Core Components
 
 ### 1. Frontend (Next.js)
-**Responsible**: User interface, client-side routing, authentication UI, state management
 
-**Key Features**:
-- Role-based dashboards (Student/Admin)
-- Exam practice interface with timer
-- Progress visualization
-- Document upload (admin only)
+**Tech**: Next.js 14 (App Router) + React 18 + TypeScript + TailwindCSS + Zustand + SWR
 
-**Key Technologies**:
-- Next.js 14 (App Router)
-- React 18
-- TailwindCSS for styling
-- SWR/React Query for API calls
-- Zustand for global state
-- NextAuth for JWT-based auth
+**Key Patterns**:
+- **AuthGuard** component wraps protected layouts; waits for Zustand hydration before checking auth
+- **Zustand auth store** with `persist` middleware + `hasHydrated` flag to prevent SSR/hydration flash
+- **SWR** for GET requests (auto-cache, dedup, revalidation)
+- **Axios interceptors**: inject `Authorization: Bearer {token}`, clear store + redirect on 401
+
+**Auth Flow**:
+1. User logs in via `/login` -> `POST /api/users/login`
+2. Backend returns `AuthResponse { access_token, token_type, user }`
+3. Frontend stores token via `apiClient.setToken()` and user in Zustand
+4. AuthGuard blocks rendering until `hasHydrated === true`
+5. 401 response -> Axios interceptor clears Zustand store -> redirect to `/login`
 
 **Directory Structure**:
 ```
 frontend/
-├── app/                    # Route pages
-│   ├── (auth)/            # Auth flows
-│   ├── (student)/         # Student dashboard, exam, progress
-│   └── (admin)/           # Admin dashboard, document management
-├── components/            # Reusable React components
-│   ├── exam/             # Question renderer, timer
-│   ├── progress/         # Charts and analytics
-│   └── shared/           # Navbar, buttons, modals
-├── hooks/                # Custom hooks (useExamQuiz, useProgress, etc.)
-└── lib/                  # Utilities, types, constants
+  app/
+    (auth)/login, register     # Public auth pages
+    dashboard/                 # Role-based dashboard
+    student/practice, progress, attempts, ask-ai
+    admin/documents, students, analytics
+    layout.tsx                 # Root layout + Providers
+  components/
+    AuthGuard.tsx             # Hydration-aware auth wrapper
+    Navbar.tsx
+  lib/
+    api/client.ts             # Axios singleton + interceptors
+    api/endpoints.ts          # authAPI, documentAPI, ragAPI, chatAPI
+    hooks/index.ts            # useAuth, useDocuments, useQuiz, etc.
+    stores/auth.ts            # Zustand with persist + hasHydrated
+    types.ts                  # TypeScript interfaces
+  config/constants.ts         # Routes, API URLs, education levels
 ```
 
 ### 2. Backend (FastAPI)
-**Responsible**: Business logic, API routes, database operations, RAG integration
+
+**Tech**: FastAPI + SQLAlchemy ORM + PostgreSQL 16 + Celery + Redis + JWT (PyJWT)
 
 **Key Features**:
-- JWT authentication
-- Document CRUD
-- Quiz generation (adaptive, topic-focused, real exam)
-- Attempt submission and grading
-- Progress tracking and analytics
-- Admin endpoints for student management
+- JWT authentication with `AuthResponse` (returns token + user in one response)
+- Document upload with async ingestion via Celery
+- RAG proxy endpoints (forward to RAG microservice)
+- Chat session management (CRUD for multi-turn conversations)
+- Progress tracking with weak topic detection
 
-**Architecture Pattern**: Service layer + Router pattern
-```python
-# routes (api/quiz.py)
-@router.post("/generate")
-async def generate_quiz(request: QuizGenerateRequest):
-    service = QuizGenerationService(rag_client, db_client)
-    quiz = service.generate(...)
-    return quiz
-
-# service (services/quiz_gen.py)
-class QuizGenerationService:
-    def generate(self, mode, student_id, count):
-        # Business logic: adaptive vs random, RAG retrieval
-```
-
-**Database Tables**:
-- `users` - Student/Admin accounts
-- `documents` - Exam papers metadata
-- `questions` - Extracted questions
-- `solutions` - Answer explanations
-- `topics` - Topic taxonomy
-- `subscriptions` - Student → Topics mapping
-- `attempts` - Quiz submissions
-- `progress` - Per-topic metrics
+**Startup**: `backend/start.sh` runs `alembic upgrade head` then starts uvicorn
 
 **Directory Structure**:
 ```
 backend/
-├── api/                  # Route handlers (quiz, attempts, etc.)
-├── models/              # Pydantic schemas + SQLAlchemy ORM models
-├── services/            # Business logic
-│   ├── rag_service.py  # RAG client wrapper
-│   ├── quiz_gen.py     # Quiz generation
-│   ├── grading.py      # Answer grading
-│   └── progress.py     # Analytics
-├── db/                  # Database setup, CRUD
-├── middleware/          # Auth, error handling
-└── config.py           # Environment configuration
+  app/
+    main.py                   # FastAPI app with CORS
+    config.py                 # Pydantic Settings from .env
+    celery_app.py             # Celery worker config
+    tasks.py                  # ingest_document async task
+    api/
+      users.py                # Register, login, me
+      documents.py            # Upload, list, share
+      quiz.py                 # Generate, get
+      attempts.py             # Submit, list
+      progress.py             # Student metrics
+      rag.py                  # RAG proxy to microservice
+      chat.py                 # Chat session CRUD
+    core/security.py          # JWT + password hashing
+    db/models.py              # 11 SQLAlchemy models
+    schemas/                  # Pydantic request/response
+      user.py                 # UserCreate, AuthResponse, etc.
+    services/
+      rag_client.py           # HTTP singleton for RAG service
+  alembic/                    # Database migrations
+  start.sh                    # Auto-migrate + start script
 ```
 
-### 3. RAG Service (Python Microservice)
-**Responsible**: Document ingestion, vector indexing, retrieval, RAG queries
+**Database Models** (11 tables):
+- `users` — email, password_hash, role, education_level
+- `documents` — filename, subject, level, year, ingestion_status, is_personal, is_shared
+- `document_shares` — M2M for student document sharing
+- `topics` — self-referential hierarchy
+- `subscriptions` — M2M user-topic
+- `questions` — extracted from documents, tagged
+- `solutions` — answer explanations
+- `quizzes` — mode, duration, document_id
+- `quiz_questions` — M2M quiz-question (ordered)
+- `attempts` — score, duration, document_id
+- `attempt_answers` — per-question correctness
+- `progress` — per-student per-topic accuracy
 
-**Key Technologies**:
-- LlamaIndex for RAG orchestration
-- LlamaCloud + LlamaParse for advanced PDF parsing
-- OpenAI/Google embeddings and LLMs
-- PostgreSQL pgvector for vector storage (or Pinecone/Weaviate)
-- PropertyGraphIndex for semantic relationships (optional)
-- BGE reranker for ranking results
+### 3. RAG Service (LlamaIndex Microservice)
 
-**Architecture**:
+**Tech**: FastAPI + LlamaIndex + Groq LLM (llama-3.3-70b-versatile) + FastEmbed (BAAI/bge-small-en-v1.5)
+
+**Key Design**:
+- **Per-collection indexes**: Each `{level}_{subject}` combination gets its own VectorStoreIndex persisted to disk
+- **Singleton pattern**: `get_rag_engine()` returns a single `LlamaIndexRAGEngine` instance
+- **Lazy configuration**: LlamaIndex Settings are configured on first use, not at import time (fast health checks)
+
+**Embedding Strategy** (when using Groq LLM):
+- Groq does not offer embeddings
+- If `OPENAI_API_KEY` is set -> use OpenAI `text-embedding-3-small`
+- Otherwise -> use **FastEmbed** (free, local, ONNX-based, no API key) with `BAAI/bge-small-en-v1.5`
+
+**RAG Query Flow** (two code paths):
+
+#### Path A: With Chat History (follow-up questions)
 ```
-PDF Upload
-  ↓
-LlamaParse (OCR) or standard readers
-  ↓
-Text chunking (SentenceSplitter)
-  ↓
-VectorStoreIndex (embedding + storage)
-  ↓
-PropertyGraphIndex (optional - relationship extraction)
-  ↓
-Persist to disk
-
-Query:
-  VectorIndexRetriever (semantic search)
-  + BM25Retriever (keyword search)
-  = QueryFusionRetriever (hybrid)
-  → SentenceTransformerRerank (rerank top-k)
-  → LLM synthesis (generate answer)
-  → PropertyGraph augmentation (optional - add graph context)
+User question + chat_history
+  -> _condense_question(): rewrite follow-up as standalone
+     (includes collection context hint, filters failed responses from history)
+  -> Retrieve: index.as_retriever(similarity_top_k) with condensed question
+  -> Log retrieval scores (min/max/avg)
+  -> Build context from retrieved nodes
+  -> Synthesis prompt with conversation history + exam content
+  -> Groq LLM.complete()
+  -> Return answer + sources + condensed_question
 ```
 
-**Query Strategies** (implemented in backend):
+#### Path B: Without Chat History (first question)
+```
+User question
+  -> _is_vague_query(): detect short/generic questions
+  -> If vague: _expand_query_with_context() adds collection context
+     e.g. "what about this paper?" -> "P6 Social studies exam paper: what about this paper? What topics, questions, and content are covered..."
+  -> Retrieve: index.as_retriever(similarity_top_k) with (expanded) question
+  -> Log retrieval scores (min/max/avg)
+  -> Build context from retrieved nodes
+  -> Choose prompt: overview prompt (vague) vs strict prompt (specific)
+  -> Groq LLM.complete()
+  -> Return answer + sources + expanded_question (if expanded)
+```
 
-1. **Adaptive Mode**: 
-   - Identify student's weak topics (accuracy < 60%)
-   - Call RAG with topic filters
-   - Return 10-15 questions on weak areas
+**Vague Query Detection** (`_is_vague_query`):
+- Matches queries <= 5 words
+- Matches patterns: "what about this", "tell me about", "this paper", "overview", etc.
 
-2. **Topic-Focused Mode**:
-   - Random questions from subscribed topics
-   - Filter by difficulty if requested
-
-3. **Real Exam Mode**:
-   - Retrieve complete exam by ID
-   - Include metadata (duration, instructions, marking scheme)
-   - Respect question order and timing
+**Document Ingestion** (`ingest`):
+```
+PDF files in source_path
+  -> Groq Vision OCR (llama-4-scout) for scanned pages
+  -> Text chunking via SentenceSplitter (1024 tokens, 100 overlap)
+  -> Build VectorStoreIndex with FastEmbed embeddings
+  -> Persist to disk at storage/{collection}/
+```
 
 **Directory Structure**:
 ```
 rag-service/
-├── rag/
-│   ├── llama_index_rag.py    # Main RAG implementation
-│   ├── queries.py             # Query strategies
-│   └── utils.py              # Helpers
-├── config/
-│   ├── settings.py           # Environment config
-│   ├── domain_config.py      # Domain-specific configs
-│   └── constants.py          # Enums, constants
-├── routes/
-│   ├── ingest.py            # Document ingestion
-│   ├── retrieve.py          # Hybrid retrieval
-│   └── query.py             # RAG queries
-└── main.py                  # FastAPI app
+  app/
+    main.py                   # FastAPI app
+    config.py                 # Settings (provider, API keys, chunking)
+    providers.py              # LLM + embedding factory
+    rag/engine.py             # LlamaIndexRAGEngine (main class)
+    routes/
+      ingest.py               # POST /ingest/
+      query.py                # POST /query/, POST /query/direct
+      retrieve.py             # POST /retrieve/
+  storage/                    # Persisted vector indexes per collection
 ```
+
+**Configuration** (`rag-service/app/config.py`):
+```python
+LLAMA_INDEX_PROVIDER = "groq"                              # groq | openai | gemini
+GROQ_MODEL = "llama-3.3-70b-versatile"                     # LLM for synthesis
+GROQ_VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"  # OCR
+CHUNK_SIZE = 1024
+CHUNK_OVERLAP = 100
+SIMILARITY_TOP_K = 10
+KG_RAG_ENABLED = False                                     # PropertyGraph (optional)
+```
+
+---
 
 ## Data Flows
 
-### Flow 1: Admin Uploads Exam Paper
+### Flow 1: Document Upload and Ingestion
 ```
-1. Admin: POST /api/documents/upload (PDF file)
-2. Backend: Store file, extract metadata, queue async job
-3. Celery Worker: Call RAG Service /ingest
-4. RAG Service: Parse PDF → Chunk → Embed → Store in vector + graph store
-5. RAG returns: success, documents_loaded, nodes_created
-6. Backend: Update document status to "completed"
-7. Frontend: Notify admin of success
-```
-
-### Flow 2: Student Takes Adaptive Practice
-```
-1. Student: GET /api/progress (see weak topics)
-   Example: Geometry 45%, Algebra 80%
-2. Student: POST /api/quiz/generate (mode="adaptive")
-3. Backend: Query Progress DB → find topics with accuracy < 60%
-4. Backend: Call RAG /query with filters {topics: ["Geometry"], difficulty: "medium"}
-5. RAG Service: Hybrid search + rank + LLM synthesis → 15 questions
-6. Backend: Store quiz, return to frontend
-7. Frontend: Render exam with timer
-8. Student: Submit answers
-9. Backend: Grade using marking scheme → calculate topic breakdown
-10. Backend: Update Progress table
-11. Frontend: Show score + weak topic recommendations
+1. Admin uploads PDF via /admin/documents page
+2. Frontend: POST /api/documents/ (multipart/form-data)
+3. Backend: saves file to uploads/, creates Document (status=PENDING)
+4. Backend: queues Celery task ingest_document(doc_id, file_path)
+5. Celery worker: reads PDF from shared backend_uploads volume
+6. Celery worker: POST /ingest/ to RAG service with collection name
+7. RAG service: OCR -> chunk -> embed -> build VectorStoreIndex -> persist
+8. Celery worker: updates Document status to COMPLETED (or FAILED)
+9. Frontend: SWR polls document list, shows updated status
 ```
 
-### Flow 3: Student Views Solution
+### Flow 2: Ask AI (Chat with Exam Paper)
 ```
-1. Student: Click "Show Solution" on failed question
-2. Frontend: POST /api/attempts/{id}/solution (question_id)
-3. Backend: Call RAG /query (question_text, filters={source_document_id})
-4. RAG: Retrieve relevant chunks + extract explanation with source attribution
-5. Backend: Return solution with source document, page number, confidence
-6. Frontend: Display explanation with "See original PDF" link
-```
-
-### Flow 4: Admin Views Student Progress
-```
-1. Admin: GET /api/admin/students/{student_id}/progress
-2. Backend: Aggregate Progress table data
-3. Return: {
-     overall_accuracy: 68%,
-     topic_metrics: [...],
-     weak_topics: ["Geometry", "Trigonometry"],
-     recommendations: ["Practice Geometry 5 more questions"],
-     learning_trend: [...last 30 days]
-   }
-4. Frontend: Render charts, heatmaps, recommendations
+1. Student selects a collection (e.g. "P6_Social_studies") on /student/ask-ai
+2. Student types "what about this paper?" (first message, no history)
+3. Frontend: POST /api/rag/query { question, collection, top_k, chat_history=[] }
+4. Backend: forwards to RAG service POST /query/
+5. RAG service:
+   a. No chat_history -> Path B
+   b. Detects vague query -> expands with collection context
+   c. Retrieves top-k nodes from VectorStoreIndex
+   d. Uses overview synthesis prompt
+   e. Returns { answer, sources, expanded_question }
+6. Frontend: displays answer + source citations
+7. Student asks follow-up "what about the religion questions?"
+8. Frontend: builds chat_history from previous messages
+9. RAG service:
+   a. Has chat_history -> Path A
+   b. Condenses follow-up into standalone question
+   c. Retrieves with condensed question
+   d. Synthesizes with conversation context
 ```
 
-## Configuration & Environment
+### Flow 3: Student Takes Adaptive Practice
+```
+1. Student: POST /api/quiz/generate (mode="adaptive")
+2. Backend: queries Progress table for topics with accuracy < 60%
+3. Backend: calls RAG /query/ with topic filters
+4. Backend: creates Quiz + QuizQuestion records
+5. Frontend: renders exam with timer
+6. Student submits -> POST /api/attempts/
+7. Backend: grades, updates Progress per-topic metrics
+8. Frontend: shows score breakdown + recommendations
+```
 
-Key environment variables control RAG behavior:
+---
+
+## Environment Variables
+
+All services read from the root `.env` file (via `env_file: .env` in docker-compose):
 
 ```env
-LLAMA_INDEX_PROVIDER=openai  # or gemini
-OPENAI_API_KEY=sk-...
-CHUNK_SIZE=1024
-CHUNK_OVERLAP=100
-SIMILARITY_TOP_K=10
-KG_RAG_ENABLED=true
-KG_RAG_GRAPH_STORE=simple  # simple, neo4j, nebula
-KG_RAG_EXTRACTOR_TYPE=simple  # simple, dynamic, schema
-WEAK_TOPIC_THRESHOLD=0.60  # 60% accuracy
+# -- Database --
+POSTGRES_USER=exam_prep
+POSTGRES_PASSWORD=exam_prep_dev
+POSTGRES_DB=exam_prep
+
+# -- Auth --
+SECRET_KEY=your-secret-key-change-in-production
+
+# -- LLM / RAG --
+LLAMA_INDEX_PROVIDER=groq
+GROQ_API_KEY=gsk_...
+OPENAI_API_KEY=                   # Optional: for OpenAI embeddings
+GOOGLE_API_KEY=                   # Optional: for Gemini provider
+
+# -- Frontend --
+NEXT_PUBLIC_API_URL=http://localhost:8000
+
+# -- Celery --
+CELERY_BROKER_URL=redis://redis:6379/0
 ```
 
-Domain-specific configurations in `rag-service/config/domain_config.py`:
-```python
-DOMAINS = {
-    "S3_Math": {
-        "rag_parsing": {
-            "instruction": "Extract mathematical problems and solutions...",
-            "parsing_tier": "parse_document_with_llm",
-        },
-        "kg_rag": {
-            "entities": ["TOPIC", "FORMULA", "QUESTION"],
-            "relations": ["COVERS", "USES_FORMULA"],
-        }
-    }
-}
-```
+---
 
-## Scaling Considerations
+## Error Handling
 
-### Phase 1 (MVP - Current)
-- Single PostgreSQL database
-- SimplePropertyGraphStore (in-memory)
-- Pinecone or pgvector for vectors
-- Celery with Redis for async jobs
-- One RAG service instance
-
-### Phase 2 (Hundreds of Users)
-- Horizontal scaling: Multiple backend instances (load balancer)
-- Multiple RAG service instances per domain/subject
-- Neo4j for PropertyGraph (scales to billions of triplets)
-- Database read replicas
-
-### Phase 3 (Thousands of Users)
-- Distributed caching (Redis cluster)
-- Message queue scaling (Kafka instead of Redis)
-- Vector store sharding by domain
-- Async question extraction (extract in background, no blocking)
-
-## Error Handling Convention
-
-All APIs follow this error format:
+All APIs follow this convention:
 ```json
 {
   "success": false,
   "error_code": "DOCUMENT_PARSE_FAILED",
   "message": "PDF parsing failed: unsupported format",
-  "details": { "file": "exam_2019.pdf", "reason": "..." }
+  "details": {}
 }
 ```
 
-Frontend uses error codes to show localized messages.
+Frontend Axios interceptor catches 401 -> clears Zustand auth store -> redirects to login.
 
-## Testing Strategy
+---
 
-1. **Frontend**: Jest + React Testing Library
-   - Component tests
-   - Hook tests (useExamQuiz, useProgress)
+## Scaling Considerations
 
-2. **Backend**: pytest
-   - Route tests (mocking RAG service)
-   - Service tests (quiz gen, grading logic)
-   - Database tests (CRUD operations)
+### Current (MVP)
+- Single PostgreSQL, single Redis
+- In-memory VectorStoreIndex persisted to disk
+- Celery with Redis broker
+- Single RAG service instance
+- FastEmbed local embeddings (no API cost)
 
-3. **RAG Service**: pytest + LlamaIndex testing utilities
-   - Ingestion tests
-   - Retrieval tests
-   - Query tests
-
-4. **Integration**: Docker Compose + pytest
-   - Full stack test: upload → ingest → quiz → grade → progress
-
-## CI/CD Pipeline (GitHub Actions)
-
-```yaml
-# .github/workflows/test.yml
-- Lint (ESLint, Black, isort)
-- Type check (mypy, TypeScript)
-- Unit tests
-- Integration tests
-- Build Docker images
-- Push to registry
-```
-
-## Monitoring & Logging
-
-- Backend: Structured logging (JSON)
-- RAG Service: Track ingestion time, retrieval latency, LLM costs
-- Frontend: Error reporting (Sentry optional)
-- Database: Slow query logs, connection pool monitoring
+### Future
+- Neo4j for PropertyGraph (when KG_RAG_ENABLED=true)
+- Pinecone / pgvector for scalable vector storage
+- Multiple RAG service instances behind load balancer
+- Database read replicas
+- Redis Cluster for Celery scaling

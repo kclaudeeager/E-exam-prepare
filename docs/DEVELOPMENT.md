@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- Node.js 18+ and npm/pnpm/yarn
+- Node.js 20+ and npm
 - Running backend on http://localhost:8000
 - Running RAG service on http://localhost:8001
 
@@ -73,10 +73,13 @@ config/
 ### Authentication Flow
 1. User enters email/password on `/register` or `/login`
 2. Frontend calls `POST /api/users/register` or `POST /api/users/login`
-3. Backend returns `{access_token, user}`
-4. Frontend stores token in localStorage + sets auth state
-5. All subsequent requests include `Authorization: Bearer {token}`
-6. 401 response → clear token & redirect to `/login`
+3. Backend returns `AuthResponse { access_token, token_type, user }`
+4. Frontend stores token via `apiClient.setToken()` and user in Zustand store
+5. Zustand `persist` middleware saves to localStorage
+6. On page load: Zustand hydrates, sets `hasHydrated=true`
+7. `AuthGuard` component waits for `hasHydrated` before checking `isAuthenticated`
+8. All subsequent requests include `Authorization: Bearer {token}`
+9. 401 response -> Axios interceptor clears Zustand store -> redirect to `/login`
 
 ### Quiz Generation
 1. Student on `/student/practice` clicks quiz mode
@@ -92,9 +95,9 @@ config/
 3. Backend saves file to `uploads/` directory
 4. Backend creates Document record with status = PENDING
 5. Backend queues Celery task `ingest_document(doc_id, file_path)`
-6. Celery worker calls RAG service `/ingest`
-7. RAG builds vector index + PropertyGraph
-8. Celery updates Document status → COMPLETED
+6. Celery worker calls RAG service `/ingest/`
+7. RAG: OCR -> chunk -> embed -> build VectorStoreIndex -> persist to disk
+8. Celery updates Document status -> COMPLETED
 9. Frontend polls document list to see status updates (via SWR revalidation)
 
 ### Progress Tracking

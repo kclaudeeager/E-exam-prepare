@@ -1,5 +1,7 @@
 # Custom LLM & Embedding Providers Setup
 
+> **⚠️ Historical Document**: This guide was written during the initial multi-provider setup. The default Groq model is now `llama-3.3-70b-versatile` (not Mixtral), and embeddings use **FastEmbed** (local ONNX, `BAAI/bge-small-en-v1.5`) by default. See [PROVIDER_SETUP.md](PROVIDER_SETUP.md) for current configuration.
+
 ## Summary
 
 You now have **3 LLM providers** and custom embedding functions ready to use:

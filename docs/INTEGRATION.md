@@ -22,6 +22,12 @@ Complete Next.js 14 TypeScript frontend with full integration to FastAPI backend
   - Real Exam: Full-length with official timing
   - Calls `POST /api/quiz/generate` → navigates to quiz
 
+- **`/student/ask-ai`** — Ask AI (chat with exam papers)
+  - Select collection (ingested paper by level + subject)
+  - Multi-turn chat with RAG-powered answers
+  - Sources shown with each response
+  - Calls `POST /api/chat/sessions`, `POST /api/rag/query`
+
 - **`/student/progress`** — Learning analytics
   - Overall accuracy %
   - Total attempts count
@@ -56,10 +62,11 @@ Complete Next.js 14 TypeScript frontend with full integration to FastAPI backend
 ## API Integration
 
 ### Request Flow
-1. **Client → Backend**: All requests go through `apiClient` (Axios singleton)
+1. **Client -> Backend**: All requests go through `apiClient` (Axios singleton)
 2. **Auth Interceptor**: Automatically adds `Authorization: Bearer {token}` to all requests
-3. **Token Storage**: JWT stored in localStorage under `e_exam_access_token`
-4. **Error Handling**: 401 responses clear token + redirect to `/login`
+3. **Token Storage**: JWT stored in localStorage via Zustand persist middleware
+4. **Hydration**: Zustand `hasHydrated` flag prevents SSR flash; AuthGuard waits before checking auth
+5. **Error Handling**: 401 responses -> Axios interceptor clears Zustand auth store -> redirect to `/login`
 
 ### API Endpoints Used
 
@@ -77,6 +84,11 @@ Complete Next.js 14 TypeScript frontend with full integration to FastAPI backend
 | GET | `/api/attempts/` | `attemptAPI.list()` | ✅ Integrated |
 | GET | `/api/attempts/{id}` | `attemptAPI.get(id)` | ✅ Ready |
 | GET | `/api/progress/` | `progressAPI.get()` | ✅ Integrated |
+| POST | `/api/rag/collections` | `ragAPI.getCollections()` | ✅ Integrated |
+| POST | `/api/rag/query` | `ragAPI.query(data)` | ✅ Integrated |
+| POST | `/api/chat/sessions` | `chatAPI.createSession(data)` | ✅ Integrated |
+| GET | `/api/chat/sessions` | `chatAPI.getSessions()` | ✅ Integrated |
+| GET | `/api/chat/sessions/{id}` | `chatAPI.getSession(id)` | ✅ Integrated |
 
 ## File Structure
 
@@ -91,6 +103,7 @@ frontend/
 │   │   ├── students/page.tsx      # Student analytics (placeholder)
 │   │   └── analytics/page.tsx     # System analytics (placeholder)
 │   ├── student/                   # Student-only routes
+│   │   ├── ask-ai/page.tsx        # Chat with exam papers (RAG)
 │   │   ├── practice/page.tsx      # Quiz mode selection
 │   │   ├── progress/page.tsx      # Learning analytics
 │   │   └── attempts/page.tsx      # Quiz history
@@ -109,6 +122,9 @@ frontend/
 │   ├── stores/
 │   │   └── auth.ts                # Zustand auth state (persisted to localStorage)
 │   └── types.ts                   # TypeScript interfaces (match backend schemas)
+├── components/
+│   ├── AuthGuard.tsx              # Hydration-aware auth wrapper (prevents SSR flash)
+│   └── Navbar.tsx                 # Top navigation bar
 ├── config/
 │   └── constants.ts               # Routes, API endpoints, education levels, quiz modes
 ├── __tests__/
@@ -138,29 +154,34 @@ frontend/
 ## Authentication Flow
 
 ```
-1. User fills login form → onClick submit
-2. useAuth().login(email, password)
-3. → authAPI.login() → axios POST /api/users/login
-4. Backend returns {access_token, user}
-5. Frontend calls apiClient.setToken(access_token)
-6. Frontend calls useAuthStore().setUser(user)
-7. Zustand persists {user, isAuthenticated} to localStorage
+Login / Register:
+1. User fills form → submit
+2. useAuth().login(email, password)  (or .register())
+3. → authAPI.login() → POST /api/users/login
+4. Backend returns AuthResponse { access_token, token_type, user }
+5. Frontend stores token via apiClient.setToken(access_token)
+6. Zustand store sets user + isAuthenticated
+7. Zustand persist middleware saves to localStorage
 8. Router.push('/dashboard')
 
 On page reload:
-1. RootLayout initializes
-2. Page component calls useAuth().fetchCurrentUser()
-3. → authAPI.getMe() → axios GET /api/users/me
-4. Frontend updates auth store with current user
-5. Protected routes check user.role and render accordingly
+1. Zustand rehydrates from localStorage
+2. onRehydrateStorage callback sets hasHydrated = true
+3. AuthGuard waits for hasHydrated before checking isAuthenticated
+4. If authenticated: render protected content
+5. If not: redirect to /login
+
+401 Error Handling:
+1. Any API call returns 401
+2. Axios interceptor calls useAuthStore.getState().logout()
+3. Zustand clears user, isAuthenticated, and token
+4. AuthGuard detects change → redirect to /login
 
 Logout:
 1. Click logout button
 2. useAuth().logout()
-3. → apiClient.clearToken()
-4. → useAuthStore().setUser(null)
-5. localStorage cleared
-6. Router.push('/login')
+3. → apiClient.clearToken() + useAuthStore clear
+4. Router.push('/login')
 ```
 
 ## Data Fetching Pattern
@@ -278,7 +299,7 @@ Extend to test:
 Before running frontend:
 
 ```bash
-# 1. Install Node.js 18+
+# 1. Install Node.js 20+
 # (from nodejs.org or via nvm)
 
 # 2. Install dependencies

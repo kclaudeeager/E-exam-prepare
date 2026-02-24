@@ -1,5 +1,7 @@
 # Groq Integration Summary - E-exam-prepare
 
+> **⚠️ Historical Document**: This overview was written during the initial Groq integration. Some details (e.g., "Mixtral 8x7B" model name, embedding fallback strategy) are outdated. The current model is `llama-3.3-70b-versatile` and embeddings use **FastEmbed** (local ONNX). See [GROQ_SETUP.md](GROQ_SETUP.md) and [ARCHITECTURE.md](ARCHITECTURE.md) for up-to-date information.
+
 ## ✅ What's Done
 
 Groq has been **fully integrated as the default LLM provider** across the entire E-exam-prepare system:

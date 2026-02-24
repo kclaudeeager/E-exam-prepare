@@ -23,6 +23,7 @@ from app.db.models import (
 from app.db.session import get_db
 from app.schemas.attempt import AttemptRead, AttemptSubmit, TopicScore, AttemptDetailRead, AttemptAnswerRead
 from app.services.rag_client import get_rag_client
+from app.services.grading import grade_answer
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -79,15 +80,25 @@ def submit_attempt(
     correct_count = 0
     topic_tallies: dict[str, dict] = {}  # topic_name → {correct, total}
 
+    # Get RAG client for LLM-based grading of non-MCQ questions
+    try:
+        rag_client = get_rag_client()
+    except Exception:
+        rag_client = None
+        logger.warning("RAG client unavailable — falling back to text-only grading")
+
     for qid_str, answer_text in body.answers.items():
         qid = uuid.UUID(qid_str)
         question = question_map.get(qid)
         if question is None:
             continue
 
-        is_correct = (
-            question.correct_answer is not None
-            and answer_text.strip().lower() == question.correct_answer.strip().lower()
+        is_correct = grade_answer(
+            question_type=question.question_type.value,
+            student_answer=answer_text,
+            correct_answer=question.correct_answer,
+            question_text=question.text,
+            rag_client=rag_client,
         )
         if is_correct:
             correct_count += 1

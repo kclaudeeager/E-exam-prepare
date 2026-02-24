@@ -7,332 +7,231 @@
 
 ### High-Level Flow
 ```
-Exam Documents (PDFs) 
-  → RAG Ingestion Pipeline
-  → Vector Store
-  → Quiz Generation Engine
-  → Student Practice Interface
-  → Assessment & Feedback
-  → Progress Tracking
+Exam Documents (PDFs)
+  -> RAG Ingestion Pipeline (Groq Vision OCR -> chunk -> embed -> VectorStoreIndex)
+  -> Per-Collection Vector Indexes (persisted to disk)
+  -> Quiz Generation Engine / Ask AI Chat
+  -> Student Practice Interface (timed quizzes, Ask AI)
+  -> Assessment & Feedback (auto-grade, explanations)
+  -> Progress Tracking (per-topic accuracy, weak topic detection)
 ```
 
-### Core Modules (Must Be Modular for Easy Onboarding)
+### Docker Compose Services (6 containers)
+```
+postgres (16-alpine)  +  redis (7-alpine)
+  -> backend (FastAPI :8000, auto-migrates on start via start.sh)
+  -> rag-service (FastAPI :8001, LlamaIndex + Groq)
+  -> celery-worker (async ingestion, shares uploads + storage volumes)
+  -> frontend (Next.js :3000)
+```
 
-#### 1. **Frontend** (Next.js + TypeScript)
-- **dashboard/**: Student/Admin dashboards with role-based views
-- **exam-practice/**: Timed exam interface, question rendering, submission
-- **document-management/**: Upload, organize, view documents
-- **progress/**: Score history, analytics, performance charts
-- **shared/**: Reusable components, hooks, utilities
+**Shared volumes**: `backend_uploads` (PDFs, mounted on backend + rag-service + celery-worker), `rag_storage` (vector indexes, mounted on rag-service + celery-worker)
 
-**Key Pattern**: Use custom React hooks for API calls (e.g., `useExamQuiz`, `useDocumentUpload`) - isolates business logic from UI.
+### Core Modules
 
-#### 2. **Backend** (Python FastAPI or Node.js)
-- **api/documents/**: CRUD for exam papers and solutions
-- **api/quiz/**: Generate random quizzes from documents (RAG integration)
-- **api/attempts/**: Record exam attempts, scoring, timing
-- **api/users/**: Auth, role management (student/admin)
-- **api/progress/**: Analytics and student learning trajectories
+#### 1. **Frontend** (Next.js 14 + TypeScript)
+- **app/(auth)/**: Login, Register pages
+- **app/dashboard/**: Role-based dashboard (student vs admin)
+- **app/student/**: Practice, Progress, Attempts, **Ask AI** (chat with exam papers)
+- **app/admin/**: Documents (upload + ingestion status), Students, Analytics
+- **components/AuthGuard.tsx**: Hydration-aware auth wrapper (prevents SSR flash)
+- **lib/stores/auth.ts**: Zustand with `persist` + `hasHydrated` flag
+- **lib/api/**: Axios singleton with JWT interceptors (authAPI, documentAPI, ragAPI, chatAPI)
+- **lib/hooks/**: useAuth, useDocuments, useQuiz, useAttempts, useProgress
 
-**Key Pattern**: All endpoints return structured responses with clear error codes for client-side handling.
+**Key Patterns**:
+- Custom React hooks isolate API calls from UI
+- AuthGuard waits for `hasHydrated` before checking auth, preventing redirect loops
+- Axios 401 interceptor clears Zustand store (not just localStorage)
+- SWR for GET requests with auto-cache and deduplication
+
+#### 2. **Backend** (Python FastAPI)
+- **api/users.py**: Register, Login (returns `AuthResponse { access_token, token_type, user }`), Me
+- **api/documents.py**: Admin upload, student upload, list (role/level-aware), share/unshare
+- **api/quiz.py**: Generate (adaptive/topic/real-exam modes, requires document_id + subject)
+- **api/attempts.py**: Submit answers (auto-grade), list, get
+- **api/progress.py**: Per-topic metrics, weak topic detection
+- **api/rag.py**: Proxy endpoints forwarding to RAG microservice
+- **api/chat.py**: Chat session CRUD (multi-turn conversation management)
+- **services/rag_client.py**: HTTP singleton wrapping RAG service API calls
+- **start.sh**: Runs `alembic upgrade head` then starts uvicorn (used in Docker)
+
+**Key Patterns**:
+- `AuthResponse` schema returns token + user in a single response (both login and register)
+- Celery task `ingest_document(doc_id, file_path)` for async ingestion
+- `WEAK_TOPIC_THRESHOLD` (default 0.60) configurable via env
 
 #### 3. **RAG Engine** (Python microservice with LlamaIndex)
-**Framework**: LlamaIndex with PropertyGraphIndex for semantic relationship extraction
+**File**: `rag-service/app/rag/engine.py` (LlamaIndexRAGEngine class)
 
-**Architecture**:
-- **Document Ingestion Pipeline** (`_build_indexes()`): 
-  - Load PDFs via SimpleDirectoryReader (with LlamaParse for advanced parsing)
-  - Chunk via SentenceSplitter (configurable chunk_size/overlap)
-  - Build dual indexes: VectorStoreIndex + PropertyGraphIndex
-  - Persist to disk for fast reload
-  
-- **Retrieval Strategy** (Hybrid):
-  - VectorIndexRetriever: Semantic search via embeddings
-  - BM25Retriever: Keyword/BM25 matching for exact terms
-  - QueryFusionRetriever: Reciprocal rank fusion of above two
-  - SentenceTransformerRerank (BGE): Rerank top candidates
-  - PropertyGraphRetriever (optional): Graph-based traversal for concept relationships
+**LLM & Embeddings**:
+- **LLM**: Groq `llama-3.3-70b-versatile` (free, via `llama-index-llms-groq`)
+- **Embeddings**: FastEmbed `BAAI/bge-small-en-v1.5` (free, local ONNX, no API key needed)
+  - Falls back to OpenAI `text-embedding-3-small` if `OPENAI_API_KEY` is set
+- **Vision OCR**: Groq `meta-llama/llama-4-scout-17b-16e-instruct` for scanned PDF pages
 
-- **Query Engine** (`_create_query_engine()`):
-  - Executes hybrid retrieval → reranking → LLM synthesis
-  - PropertyGraph augmentation: if enabled, enriches answer with extracted triplets
+**Singleton Pattern**: `get_rag_engine()` returns one global instance. Lazy configuration — LlamaIndex Settings configured on first use (fast health checks at startup).
 
-**Extractors** (for PropertyGraph):
-- **SimpleLLMPathExtractor**: Single-hop (subject, relation, object) triplets
-- **DynamicLLMPathExtractor**: Multi-hop paths with entity/relation type constraints
-- **SchemaLLMPathExtractor**: Strict schema validation (exam entity→relation mapping)
-- **ImplicitPathExtractor**: Captures pre-existing relationships
+**Per-Collection Indexes**: Each `{level}_{subject}` (e.g. `P6_Social_studies`) has its own VectorStoreIndex persisted at `storage/{collection}/`. Loaded on demand and cached in `self._indexes`.
+
+**Document Ingestion** (`ingest`):
+```
+PDF files -> Groq Vision OCR (for scanned pages)
+  -> SentenceSplitter (chunk_size=1024, overlap=100)
+  -> Build VectorStoreIndex with FastEmbed embeddings
+  -> Persist to disk at storage/{collection}/
+```
+
+**Query Flow** (two code paths in `query()` method):
+
+**Path A — With chat_history** (follow-up questions):
+1. `_condense_question()`: Rewrites follow-up as standalone question
+   - Includes collection context hint (e.g. "This is about P6 Social studies")
+   - Filters out failed assistant responses from history
+2. Retrieve with condensed question via `index.as_retriever(similarity_top_k)`
+3. Log retrieval scores (min/max/avg) for debugging
+4. Synthesize with conversation history block + exam content context
+5. Returns: `{ answer, sources, condensed_question }`
+
+**Path B — Without chat_history** (first question in session):
+1. `_is_vague_query()`: Detects short/generic questions (<=5 words or pattern match)
+   - Patterns: "what about this", "tell me about", "this paper", "overview", etc.
+2. If vague: `_expand_query_with_context()` prepends collection name + context
+   - e.g. "what about this paper?" -> "P6 Social studies exam paper: what about this paper? What topics, questions, and content are covered in the P6 Social studies exam?"
+3. Retrieve with (expanded) question
+4. Log retrieval scores
+5. Choose synthesis prompt: **overview prompt** (vague) vs **strict prompt** (specific)
+   - Overview prompt asks LLM to summarize subject, format, topics, details
+   - Strict prompt tells LLM to say "I could not find" if answer not in content
+6. Returns: `{ answer, sources, expanded_question (if expanded) }`
 
 **Key Methods**:
-- `ingest(source_path, overwrite)`: Load documents, chunk, build both indexes
-- `retrieve(query, top_k)`: Return ranked chunks + graph triplets (if enabled)
-- `query(question, top_k)`: Full RAG with LLM answer + graph augmentation
-- `_pg_augmented_query()`: Re-synthesize answer using both vector context + graph paths
+- `ingest(source_path, collection, overwrite)`: Load PDFs, chunk, embed, build index
+- `retrieve(query, collection, top_k)`: Return ranked chunks with scores
+- `query(question, collection, top_k, chat_history)`: Full RAG with LLM answer
+- `_condense_question(question, chat_history, collection)`: Rewrite follow-up as standalone
+- `_is_vague_query(question)`: Detect vague/short questions
+- `_expand_query_with_context(question, collection)`: Add collection context for better retrieval
 
-**Key Pattern**: Store exam metadata (official_duration_minutes, instructions) in document metadata before ingestion — retrieved during quiz setup.
+**Configuration** (`rag-service/app/config.py`):
+```python
+LLAMA_INDEX_PROVIDER = "groq"          # groq | openai | gemini
+GROQ_MODEL = "llama-3.3-70b-versatile"
+GROQ_VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
+CHUNK_SIZE = 1024
+CHUNK_OVERLAP = 100
+SIMILARITY_TOP_K = 10
+KG_RAG_ENABLED = False                 # PropertyGraph (optional, future)
+```
 
-#### 4. **Database**
-- **documents**: Store metadata (subject, level, year, uploader, created_at, official_duration, instructions)
-- **questions**: Extracted questions with embeddings, topic/subtopic tags, source references
-- **solutions**: Answer explanations linked to questions with confidence scores
-- **users**: Student/Admin profiles with roles and subscriptions (topics user wants to focus on)
-- **attempts**: Exam submissions with timestamps, answers, scores, topic-level breakdown
-- **progress**: Per-student, per-topic metrics (accuracy %, attempts count, last_attempted_date)
-- **subscriptions**: Track which topics each student is focusing on
+#### 4. **Database** (PostgreSQL 16, 11 tables)
+- **users**: email, password_hash, role (student/admin), education_level (P6/S3/S6/TTC)
+- **documents**: filename, subject, level, year, ingestion_status, is_personal, is_shared, official_duration_minutes, instructions
+- **document_shares**: M2M junction for student document sharing
+- **topics**: Self-referential hierarchy (parent_id)
+- **subscriptions**: M2M user-topic
+- **questions**: Extracted from documents, tagged with topics
+- **solutions**: Answer explanations linked to questions
+- **quizzes**: mode, duration, document_id
+- **quiz_questions**: M2M quiz-question (ordered)
+- **attempts**: score, duration, document_id
+- **attempt_answers**: Per-question correctness
+- **progress**: Per-student per-topic accuracy metrics
 
 **Key Pattern**: Soft deletes for audit trail; never delete exam attempts. Topic-level metrics enable adaptive recommendations.
+
+## Authentication Flow (Current Implementation)
+
+```
+1. User calls POST /api/users/login (or /register)
+2. Backend returns AuthResponse { access_token, token_type: "bearer", user: UserRead }
+3. Frontend stores token via apiClient.setToken(), user in Zustand store
+4. Zustand persist middleware saves to localStorage
+5. On page load: Zustand hydrates from localStorage, sets hasHydrated=true
+6. AuthGuard component waits for hasHydrated before checking isAuthenticated
+7. All API requests: Axios interceptor adds Authorization: Bearer {token}
+8. On 401: Axios interceptor calls useAuthStore.getState().logout() (clears Zustand + token)
+9. AuthGuard detects isAuthenticated=false -> redirect to /login
+```
+
+**Critical**: Both `/login` and `/register` return the same `AuthResponse` shape. Frontend never needs a separate `/me` call after auth.
 
 ## User Workflows
 
 ### Admin Flow
-1. Log in → Document Management
-2. Upload exam paper + answer document (PDF)
-3. System processes: Extract questions/solutions → Generate embeddings
-4. Optionally curate/edit extracted content (validate RAG accuracy)
-5. View student progress dashboard (aggregate stats, learning curves)
+1. Log in -> Document Management
+2. Upload exam paper PDF (specify subject, level, year)
+3. System queues Celery task -> RAG ingestion (OCR -> chunk -> embed -> index)
+4. Document status: PENDING -> INGESTING -> COMPLETED
+5. View student progress dashboard
 
 ### Student Flow
-1. Log in → Practice Dashboard
-2. **Subscribe to topics** (Math → Algebra, Geometry; Biology → Genetics, etc.)
+1. Log in -> Practice Dashboard
+2. **Ask AI**: Select collection (ingested paper), chat with it
+   - First question gets smart expansion if vague
+   - Follow-ups use chat history condensation
 3. **Three Quiz Modes**:
-   - **Adaptive Practice**: System recommends weak topics based on past performance
-   - **Topic-Focused**: Random quiz within subscribed topics (5-15 questions)
-   - **Real Exam Simulation**: Full-length exam with official timing (e.g., 2.5 hours for S3 Math)
-4. Timer countdown during attempt (with pause alerts for real exams)
-5. Submit answers → Get instant score breakdown by topic
-6. Click "Show Solution" on failed questions → RAG retrieves explanation + source document
-7. View analytics: accuracy per topic, improvement trends, weakness recommendations
-
-## Critical Design Patterns
-
-### Modularity for Onboarding
-- **Clear folder structure**: Each feature is self-contained (documents/, quiz/, progress/)
-- **API contract definitions**: Shared TypeScript interfaces/Pydantic models prevent integration bugs
-- **Environment config**: Externalize RAG model choice, database URLs, vector store type
-- **Documentation-first**: Every module has `README.md` explaining purpose and key functions
-
-### Adaptive Quiz Engine (Core Intelligence)
-- **Weak Topic Detection**: Calculate accuracy per topic from `attempts` table
-  - If accuracy < 60% in a topic → flag for adaptive practice
-  - Recommend: "You scored 45% on Geometry - practice more Geometry questions?"
-- **Adaptive Quiz Generation**: When student chooses "Recommended Practice"
-  - Retrieve weak topics from progress table
-  - Query RAG for questions ONLY from those topics
-  - Deliver 10-15 questions, slightly easier than real exam difficulty
-- **Real Exam Mode**: Fetch complete exam with:
-  - Official duration from document metadata (e.g., "2 hours 30 minutes")
-  - Question order as published
-  - Official marking scheme for grading
-  - Display timer with warnings at 10 mins, 5 mins remaining
-
-### RAG Integration Pattern (LlamaIndex-based)
-
-**Singleton Architecture** (`__new__` pattern):
-- One instance per (provider, collection, reuse_index) combo
-- Prevents duplicate index loading in memory
-- Supports multiple collections (Math, Biology, etc. can each have their own index)
-
-**Settings Configuration** (via config/settings.py):
-- `LLAMA_INDEX_PROVIDER`: "openai" or "gemini" (determines LLM + embeddings)
-- `CHUNK_SIZE` / `CHUNK_OVERLAP`: Default 1024/100 for semantic coherence
-- `SIMILARITY_TOP_K`: How many results to rerank (default 10)
-- `kg_rag.enabled`: Enable PropertyGraph for exam relationship extraction
-- `kg_rag.extractors.type`: "simple", "dynamic", or "schema" — choose based on domain richness
-- `kg_rag.graph_store`: "simple" (in-memory), "neo4j" (scalable), or "nebula"
-
-**Ingest Pipeline** (call once per document upload):
-```python
-rag = LlamaIndexRAG(provider="openai", collection="S3_Math")
-result = rag.ingest(
-    source_path="/path/to/exam_papers/",
-    overwrite=False  # Append to existing index
-)
-# Returns: {success, documents_loaded, nodes_created, time_seconds, property_graph_built}
-```
-
-**Retrieval Modes**:
-- `retrieve(query, top_k=10)`: Get ranked chunks + graph triplets
-  - Returns: `{results: [{rank, score, content, metadata}, ...], graph_paths: [...]}`
-  - Used for displaying source material during quiz review
-  
-- `query(question, top_k=10)`: Full RAG with LLM answer
-  - Returns: `{answer: "synthesized response", sources: [...], graph_enhanced: bool}`
-  - Used for "Show Solution" explanations after quiz submission
-
-**Graph Extraction for Exams** (PropertyGraph):
-- Extract triplets like: `(Algebra_Topic) -[SUBTOPIC_OF]-> (Math), (Question_2019_Q5) -[COVERS]-> (Algebra)`
-- Use `SchemaLLMPathExtractor` for structured exam domain:
-  ```yaml
-  extractors:
-    type: schema
-    entities: [SUBJECT, TOPIC, QUESTION, YEAR, DIFFICULTY]
-    relations: [COVERS, PREREQUISITE_FOR, SIMILAR_TO, FROM_EXAM]
-  ```
-- Enables graph queries: "Find all Geometry questions harder than student's last attempt"
-
-### Error Handling Convention
-```
-{
-  "success": false,
-  "error_code": "DOCUMENT_PARSE_FAILED",  // Specific code for client handling
-  "message": "PDF parsing failed: unsupported format",
-  "details": { /* debug info */ }
-}
-```
-
-## Technology Choices
-
-### Frontend: Next.js
-- **Why**: Server-side rendering for better SEO, API routes reduce backend coupling
-- **Key Libraries**: TailwindCSS (styling), SWR/React Query (data fetching), next-auth (auth)
-- **Structure**: `app/` directory with route groups for role-based UI separation
-
-### Backend: Python FastAPI (Recommended) OR Node.js
-- **Python**: Better for RAG/ML integration, LangChain ecosystem, vector operations
-- **Node.js**: If team prefers TypeScript everywhere, but adds LLM library complexity
-- **Choice**: **Default to Python** for RAG flexibility
-
-### Vector Store Options
-- **Development**: Pinecone (free tier), Supabase pgvector (PostgreSQL)
-- **Production**: Weaviate (self-hosted), Milvus, or Pinecone (scaled)
-
-### LLM Options
-- **Commercial**: OpenAI API (GPT-4 for explanations), Claude for nuance
-- **Open-Source**: Llama 2, Mistral (via Ollama locally)
-- **Recommendation**: Start with OpenAI (easiest RAG integration), swap later if cost is concern
+   - **Adaptive Practice**: System recommends weak topics (accuracy < 60%)
+   - **Topic-Focused**: Random quiz within subscribed topics
+   - **Real Exam Simulation**: Full-length exam with official timing
+4. Submit answers -> auto-grade -> per-topic score breakdown
+5. View analytics: accuracy per topic, improvement trends
 
 ## Development Workflow
 
+### Docker Setup (Recommended)
+```bash
+# Create root .env with API keys (see docs/SETUP_GUIDE.md)
+make docker-up          # starts all 6 containers
+
+# Rebuild a single service after code changes
+docker compose up -d --build rag-service
+
+# View logs
+docker compose logs -f rag-service
+docker compose logs backend --tail=50
+```
+
 ### Local Setup
 ```bash
-# Install uv (if not installed)
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Install all Python dependencies (workspace: backend + rag-service + web-scrap)
-uv sync --all-packages
-
-# Frontend
-cd frontend && npm install && npm run dev
-
-# Backend
-cd backend && uv run uvicorn app.main:app --reload --port 8000
-
-# RAG Service (separate process)
-cd rag-service && uv run uvicorn app.main:app --reload --port 8001
-
-# Or use Make targets
-make install          # uv sync + npm install
-make dev-all          # run all three services in parallel
+uv sync --all-packages                      # Python deps
+cd frontend && npm install                   # JS deps
+make dev-all                                 # all 3 services in parallel
 ```
 
 ### Key Commands (Root Makefile)
 ```bash
-# Run all services
-make dev-all
-
-# Run tests
-make test             # pytest backend + rag-service + jest frontend
-
-# Format & lint code
-make lint             # ruff check backend/ rag-service/
-make format           # ruff format backend/ rag-service/
+make docker-up        # Docker Compose up (all services)
+make dev-all          # Local dev (3 servers in parallel)
+make install          # uv sync + npm install
+make test             # pytest + jest
+make lint             # ruff check
+make format           # ruff format
 ```
 
-### Code Standards for Easy Onboarding
+### Code Standards
 - **Frontend**: ESLint + Prettier (format on save)
-- **Backend**: Ruff for linting + formatting (replaces Black, isort, Flake8)
+- **Backend**: Ruff for linting + formatting
 - **Commit**: Conventional commits (feat:, fix:, refactor:)
-- **PR Reviews**: Require clear docstrings on RAG/embedding functions (most prone to errors)
-
-## Data Flow: Quiz Generation Example
-
-### Scenario 1: Adaptive Practice (Student's Weak Areas)
-```
-1. Student clicks "Get Recommended Practice"
-  ↓
-2. Backend queries Progress table: student's topics with accuracy < 60%
-  → Result: {Geometry: 45%, Biology_Genetics: 35%}
-  ↓
-3. Backend calls RAG Service: retrieve_questions(
-     topics=["Geometry", "Biology_Genetics"],
-     difficulty="medium",
-     count=15
-   )
-  ↓
-4. RAG queries vector store with topic filters
-  → Returns 15 questions, tagged by source exam/year
-  ↓
-5. Frontend renders 15-question quiz with standard timer
-  ↓
-6. Student submits
-  ↓
-7. Backend grades, calculates per-topic accuracy, updates Progress
-  → Geometry attempt #5: 8/10 (80% - improvement!)
-  ↓
-8. Frontend shows: "Great improvement on Geometry! Keep practicing."
-```
-
-### Scenario 2: Real Exam Simulation (Full-Length, Timed)
-```
-1. Student selects "S3 Mathematics 2019 - Real Exam"
-  ↓
-2. Backend retrieves exam with metadata:
-   - official_duration_minutes: 150 (2 hours 30 mins)
-   - question_count: 45
-   - instructions: "Answer all questions. Show working."
-  ↓
-3. Frontend starts exact 150-minute countdown timer
-  ↓
-4. Timer alerts at 10 mins and 5 mins remaining (per exam instructions)
-  ↓
-5. Student submits before/at deadline
-  ↓
-6. Backend grades using official marking scheme
-  ↓
-7. Frontend displays:
-   - Total score: 78/100
-   - Per-topic breakdown (Algebra: 90%, Geometry: 65%, Trigonometry: 80%)
-   - Official pass threshold indicator
-  ↓
-8. Student can review failed questions + retrieve explanations
-```
-
-### Scenario 3: Topic-Focused Practice (Student Subscription)
-```
-1. Student subscribed to: Math, Biology, English
-  ↓
-2. Student clicks "Math Practice - Random 10 Questions"
-  ↓
-3. Backend calls RAG: retrieve_questions(
-     subject="Math",
-     subscribed_topics_only=True,
-     count=10,
-     random=True
-   )
-  ↓
-4. Quiz generated, student completes
-  ↓
-5. Results update Progress.topic_metrics for all Math subtopics practiced
-```
+- **All documentation**: Lives in `docs/` folder (not scattered in root or sub-services)
 
 ## Important Implementation Notes
-- **PDF Parsing**: Use LlamaParse (via LlamaCloud API) for OCR-rich exam papers; fallback to PyPDF2/pdfplumber
-- **Exam Metadata Extraction**: Extract `official_duration_minutes`, `instructions`, `marking_scheme` from PDF metadata/headers before chunking — store in document metadata
-- **Document Ingestion**: Queue as async job (Celery/Bull) to prevent upload blocking; support incremental appends (overwrite=False adds to existing index)
-- **Singleton Pattern**: Use `LlamaIndexRAG(provider="openai", collection="S3_Math")` — only one instance per collection in memory
-- **Hybrid Retrieval**: Always use Vector + BM25 fusion for both semantic + keyword matching (critical for exam papers with specific terminologies)
-- **PropertyGraph Configuration**: Start with `SimpleLLMPathExtractor` for MVP; upgrade to `SchemaLLMPathExtractor` when you have domain-specific entity/relation types defined
-- **Reranking**: BGE reranker essential for curating top-k before LLM synthesis (reduces hallucinations with large retrieval sets)
-- **Topic Filtering in Adaptive Mode**: Add metadata tags (topic, subtopic, difficulty, year) during ingestion — filter RAG queries by these before retrieval
-- **Caching Retrieved Paths**: Cache graph triplets for frequent queries to reduce LLM extraction costs
-- **Rate Limiting**: Implement per-student quota on `query()` calls (expensive LLM synthesis) — batch questions during admin review if possible
-- **Graph Store Scaling**: Use SimplePropertyGraphStore for development (<1M triplets); migrate to Neo4j when handling 1000+ exams
-- **Weak Topic Threshold**: Configurable (default 60%) — update Progress.topic_metrics after each attempt, query RAG with filtered topic list for adaptive quizzes
+
+- **PDF Parsing**: Groq Vision (`llama-4-scout`) for OCR on scanned exam papers; LlamaParse as optional advanced parser
+- **Document Ingestion**: Queued as Celery async task. `backend_uploads` volume shared across backend, rag-service, and celery-worker containers
+- **Singleton RAG Engine**: `get_rag_engine()` returns one global instance; per-collection indexes loaded on demand
+- **Vague Query Expansion**: First-time questions like "what about this paper?" are expanded with collection context before vector search, improving retrieval relevance
+- **Chat History Condensation**: Follow-up questions are rewritten as standalone queries with collection context hint; failed assistant responses are filtered from history
+- **Dual Synthesis Prompts**: Vague questions get an overview prompt (summarize the paper); specific questions get a strict prompt (answer from content or say "could not find")
+- **Retrieval Score Logging**: Both code paths log min/max/avg similarity scores for debugging retrieval quality
+- **Embedding Strategy**: FastEmbed (free, local, ONNX) by default when using Groq LLM; OpenAI embeddings if `OPENAI_API_KEY` is provided
+- **Auth Pattern**: `AuthResponse` returns token + user together; Zustand `hasHydrated` flag prevents SSR redirect loops; AuthGuard wraps protected layouts
+- **Weak Topic Threshold**: Configurable via `WEAK_TOPIC_THRESHOLD` env var (default 0.60)
 
 ## Extending the System
-1. **New Features**: Create isolated module under `/api` or `/app` with own `routes/`, `models/`, `services/`
-2. **New Subject/Level**: Update enum constants in shared interfaces, test with existing documents
-3. **New RAG Model**: Swap embedding provider in `rag-service/app/config.py`, test on sample questions
-4. **Scale to Admins**: Add `/api/admin/students` endpoint returning aggregate progress, paginate results
-5. **Graph Extraction Tuning**: Migrate from SimpleLLMPathExtractor → SchemaLLMPathExtractor with custom entity/relation types (e.g., EXAM, QUESTION, CONCEPT, COVERS, PREREQUISITE_FOR)
-6. **Vector Store Migration**: Start with SimplePropertyGraphStore (in-memory); move to Neo4j for horizontal scaling and advanced Cypher queries
+1. **New Features**: Create isolated module under `backend/app/api/` with own routes + schemas
+2. **New Subject/Level**: Update enum constants in shared interfaces, upload documents
+3. **New RAG Model**: Change `LLAMA_INDEX_PROVIDER` and model name in `.env`, restart RAG service
+4. **PropertyGraph**: Set `KG_RAG_ENABLED=true` in config; implement extractors in engine.py
+5. **Scale Vector Store**: Current: persisted VectorStoreIndex on disk. Future: pgvector, Pinecone, or Weaviate
+6. **All docs**: `docs/` folder — see `docs/DOCS_INDEX.md` for full map

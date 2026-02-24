@@ -390,7 +390,8 @@ class LlamaIndexRAGEngine:
     # ── Chat context handling ──────────────────────────────────────────────
 
     def _condense_question(
-        self, question: str, chat_history: list[dict[str, str]]
+        self, question: str, chat_history: list[dict[str, str]],
+        collection: str = "",
     ) -> str:
         """Rewrite a follow-up question as a standalone query using chat context.
 
@@ -401,8 +402,17 @@ class LlamaIndexRAGEngine:
         self._ensure_configured()
         from llama_index.core import Settings as LISettings
 
+        # Filter out failed/unhelpful exchanges to avoid poisoning the condenser
+        filtered_history = [
+            msg for msg in chat_history
+            if not (
+                msg.get("role") == "assistant"
+                and "could not find" in msg.get("content", "").lower()
+            )
+        ]
+
         # Format last 10 messages (truncate long content to save tokens)
-        recent = chat_history[-10:]
+        recent = filtered_history[-10:]
         history_lines = []
         for msg in recent:
             role = "Student" if msg.get("role") == "user" else "Tutor"
@@ -410,11 +420,22 @@ class LlamaIndexRAGEngine:
             history_lines.append(f"{role}: {content}")
         history_text = "\n".join(history_lines)
 
+        # Build collection context hint
+        collection_hint = ""
+        if collection:
+            # Turn "P6_Social_studies" → "P6 Social studies"
+            readable = collection.replace("_", " ")
+            collection_hint = (
+                f"The student is studying from the '{readable}' exam paper collection.\n"
+            )
+
         condense_prompt = (
             "Given the following conversation between a student and an AI tutor, "
             "and a follow-up question, rewrite the follow-up question as a "
             "standalone question that includes all necessary context.\n"
-            "Do NOT answer the question — only rewrite it.\n\n"
+            f"{collection_hint}"
+            "Do NOT answer the question — only rewrite it.\n"
+            "Keep the rewritten question concise (1-2 sentences max).\n\n"
             "Chat History:\n"
             f"{history_text}\n\n"
             f"Follow-Up Question: {question}\n\n"
@@ -423,8 +444,42 @@ class LlamaIndexRAGEngine:
 
         response = LISettings.llm.complete(condense_prompt)
         condensed = str(response).strip()
-        logger.info("Condensed: '%s' → '%s'", question[:60], condensed[:100])
+        logger.info("Condensed [%s]: '%s' → '%s'", collection, question[:80], condensed[:200])
         return condensed
+
+    # ── Vague query expansion ──────────────────────────────────────────────
+
+    _VAGUE_PATTERNS = {
+        "what about this", "what is this", "tell me about", "what does this",
+        "what's this", "about this paper", "about this exam", "this paper",
+        "this exam", "what's in", "what is in", "show me", "describe this",
+        "summarize this", "summarise this", "overview", "what topics",
+    }
+
+    def _is_vague_query(self, question: str) -> bool:
+        """Detect if a question is too vague for effective vector search."""
+        q = question.lower().strip().rstrip("?.!")
+        # Very short queries are almost always vague
+        if len(q.split()) <= 5:
+            return True
+        return any(p in q for p in self._VAGUE_PATTERNS)
+
+    def _expand_query_with_context(self, question: str, collection: str) -> str:
+        """Expand a vague query by prepending collection context.
+
+        This improves vector retrieval for first-time queries like
+        'what about this paper?' where there is no chat history to condense.
+        """
+        readable = collection.replace("_", " ")
+        expanded = (
+            f"{readable} exam paper: {question} "
+            f"What topics, questions, and content are covered in the {readable} exam?"
+        )
+        logger.info(
+            "Expanded vague query [%s]: '%s' → '%s'",
+            collection, question[:80], expanded[:200],
+        )
+        return expanded
 
     # ── Query (full RAG) ──────────────────────────────────────────────────
 
@@ -451,11 +506,22 @@ class LlamaIndexRAGEngine:
             from llama_index.core import Settings as LISettings
 
             # 1. Condense for better retrieval
-            search_question = self._condense_question(question, chat_history)
+            search_question = self._condense_question(question, chat_history, collection)
 
             # 2. Retrieve with condensed question
             retriever = index.as_retriever(similarity_top_k=top_k)
             nodes = retriever.retrieve(search_question)
+
+            # Log retrieval quality
+            if nodes:
+                scores = [round(float(n.score or 0.0), 4) for n in nodes]
+                logger.info(
+                    "Retrieved %d nodes [%s] scores: min=%.4f max=%.4f avg=%.4f",
+                    len(nodes), collection, min(scores), max(scores),
+                    sum(scores) / len(scores),
+                )
+            else:
+                logger.warning("No nodes retrieved for [%s] query: '%s'", collection, search_question[:100])
 
             # 3. Build context from retrieved nodes
             context_str = "\n\n---\n\n".join(
@@ -471,22 +537,48 @@ class LlamaIndexRAGEngine:
                 history_lines.append(f"{role}: {content}")
             history_block = "\n".join(history_lines)
 
-            # 5. Synthesize with full context
-            synthesis_prompt = (
-                "You are an expert exam tutor helping a student prepare for exams. "
-                "Use ONLY the exam paper content below to answer.\n"
-                "If the answer is not in the content, say: "
-                "'I could not find that information in the provided exam papers.'\n"
-                "Do not guess or use outside knowledge.\n\n"
-                "--- Exam Content ---\n"
-                f"{context_str}\n"
-                "--- End Exam Content ---\n\n"
-                "--- Previous Conversation ---\n"
-                f"{history_block}\n"
-                "--- End Previous Conversation ---\n\n"
-                f"Student: {question}\n"
-                "Tutor:"
-            )
+            # 5. Synthesize with full context — pick prompt based on question type
+            readable_collection = collection.replace("_", " ")
+            is_vague = self._is_vague_query(question)
+
+            if is_vague:
+                # Vague questions (like "what about this paper?") get an overview prompt
+                synthesis_prompt = (
+                    "You are an expert exam tutor helping a student prepare for exams. "
+                    f"The student is studying from the '{readable_collection}' exam paper collection.\n"
+                    "The student is asking a general question about this exam paper.\n"
+                    "Based on the exam content below, provide a helpful overview:\n"
+                    "- What subject/topic the exam covers\n"
+                    "- The exam format (multiple choice, short answer, essay, etc.)\n"
+                    "- Key topics and themes you can see in the questions\n"
+                    "- Any other useful details (year, duration, instructions)\n\n"
+                    "--- Exam Content ---\n"
+                    f"{context_str}\n"
+                    "--- End Exam Content ---\n\n"
+                    "--- Previous Conversation ---\n"
+                    f"{history_block}\n"
+                    "--- End Previous Conversation ---\n\n"
+                    f"Student: {question}\n"
+                    "Tutor:"
+                )
+            else:
+                # Specific questions get the strict prompt
+                synthesis_prompt = (
+                    "You are an expert exam tutor helping a student prepare for exams. "
+                    f"The student is studying from the '{readable_collection}' exam paper collection.\n"
+                    "Use ONLY the exam paper content below to answer.\n"
+                    "If the answer is not in the content, say: "
+                    "'I could not find that information in the provided exam papers.'\n"
+                    "Do not guess or use outside knowledge.\n\n"
+                    "--- Exam Content ---\n"
+                    f"{context_str}\n"
+                    "--- End Exam Content ---\n\n"
+                    "--- Previous Conversation ---\n"
+                    f"{history_block}\n"
+                    "--- End Previous Conversation ---\n\n"
+                    f"Student: {question}\n"
+                    "Tutor:"
+                )
 
             response = LISettings.llm.complete(synthesis_prompt)
             answer = str(response).strip()
@@ -509,43 +601,92 @@ class LlamaIndexRAGEngine:
                 "condensed_question": search_question,
             }
 
-        # ── Without chat history: standard query engine (backward compatible) ──
-        from llama_index.core.prompts import PromptTemplate
+        # ── Without chat history: manual retrieval + synthesis ──────────────
+        self._ensure_configured()
+        from llama_index.core import Settings as LISettings
 
-        qa_prompt = PromptTemplate(
-            "You are an expert exam tutor. Use ONLY the exam paper content below to answer.\n"
-            "If the answer is not present in the content, say exactly: "
-            "'I could not find that information in the provided exam papers.'\n"
-            "Do not guess or use outside knowledge.\n\n"
-            "---------------------\n"
-            "{context_str}\n"
-            "---------------------\n\n"
-            "Question: {query_str}\n"
-            "Answer:"
+        # Expand vague queries with collection context for better retrieval
+        search_question = question
+        if self._is_vague_query(question):
+            search_question = self._expand_query_with_context(question, collection)
+
+        # Retrieve
+        retriever = index.as_retriever(similarity_top_k=top_k)
+        nodes = retriever.retrieve(search_question)
+
+        # Log retrieval quality
+        if nodes:
+            scores = [round(float(n.score or 0.0), 4) for n in nodes]
+            logger.info(
+                "Retrieved %d nodes [%s] scores: min=%.4f max=%.4f avg=%.4f",
+                len(nodes), collection, min(scores), max(scores),
+                sum(scores) / len(scores),
+            )
+        else:
+            logger.warning("No nodes retrieved for [%s] query: '%s'", collection, search_question[:100])
+
+        # Build context from retrieved nodes
+        context_str = "\n\n---\n\n".join(
+            node.get_content() for node in nodes
         )
 
-        query_engine = index.as_query_engine(
-            similarity_top_k=top_k,
-            text_qa_template=qa_prompt,
-        )
-        response = query_engine.query(question)
+        # Synthesize — use different prompts for vague vs specific questions
+        readable_collection = collection.replace("_", " ")
+        is_vague = self._is_vague_query(question)
+
+        if is_vague:
+            synthesis_prompt = (
+                "You are an expert exam tutor. "
+                f"The student is studying from the '{readable_collection}' exam paper collection.\n"
+                "The student is asking a general question about this exam paper.\n"
+                "Based on the exam content below, provide a helpful overview:\n"
+                "- What subject/topic the exam covers\n"
+                "- The exam format (multiple choice, short answer, essay, etc.)\n"
+                "- Key topics and themes you can see in the questions\n"
+                "- Any other useful details (year, duration, instructions)\n\n"
+                "--- Exam Content ---\n"
+                f"{context_str}\n"
+                "--- End Exam Content ---\n\n"
+                f"Question: {question}\n"
+                "Answer:"
+            )
+        else:
+            synthesis_prompt = (
+                "You are an expert exam tutor. "
+                f"The student is studying from the '{readable_collection}' exam paper collection.\n"
+                "Use ONLY the exam paper content below to answer.\n"
+                "If the answer is not present in the content, say exactly: "
+                "'I could not find that information in the provided exam papers.'\n"
+                "Do not guess or use outside knowledge.\n\n"
+                "--- Exam Content ---\n"
+                f"{context_str}\n"
+                "--- End Exam Content ---\n\n"
+                f"Question: {question}\n"
+                "Answer:"
+            )
+
+        response = LISettings.llm.complete(synthesis_prompt)
+        answer = str(response).strip()
 
         sources = [
             {
                 "rank": i + 1,
-                "content": sn.get_content()[:400],
-                "score": round(float(sn.score or 0.0), 4),
-                "metadata": sn.metadata,
+                "content": node.get_content()[:400],
+                "score": round(float(node.score or 0.0), 4),
+                "metadata": node.metadata,
             }
-            for i, sn in enumerate(response.source_nodes)
+            for i, node in enumerate(nodes)
         ]
 
-        return {
+        result = {
             "success": True,
-            "answer": str(response),
+            "answer": answer,
             "sources": sources,
             "graph_enhanced": False,
         }
+        if search_question != question:
+            result["expanded_question"] = search_question
+        return result
 
     # ── Graph exploration (placeholder until PropertyGraph is wired) ──────
 

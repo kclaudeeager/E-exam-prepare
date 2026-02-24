@@ -1,5 +1,7 @@
 # Groq Integration - Complete! ✅
 
+> **⚠️ Historical Document**: This was written when Groq was first integrated. References to "Mixtral 8x7B" are outdated — the current default model is `llama-3.3-70b-versatile`. Embeddings now use **FastEmbed** (local ONNX) by default. See [ARCHITECTURE.md](ARCHITECTURE.md) for current system design.
+
 ## Summary
 
 **Groq has been fully integrated and set as the default LLM provider for E-exam-prepare.**

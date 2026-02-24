@@ -1,5 +1,7 @@
 # Groq Integration - Changes Summary
 
+> **⚠️ Historical Document**: This changelog was written when Groq was first integrated. Some references (e.g., "Mixtral 8x7B") are outdated. The current default model is `llama-3.3-70b-versatile` and embeddings use **FastEmbed** (local ONNX, `BAAI/bge-small-en-v1.5`). See [ARCHITECTURE.md](ARCHITECTURE.md) and [GROQ_SETUP.md](GROQ_SETUP.md) for current configuration.
+
 ## Overview
 Groq has been fully integrated as the **default LLM provider** for the E-exam-prepare platform. All inference operations (quiz generation, answer explanation, document processing) now use Groq's free, ultra-fast LPU™ architecture.
 
