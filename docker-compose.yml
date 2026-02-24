@@ -66,6 +66,7 @@ services:
     ports:
       - "8001:8001"
     volumes:
+      - backend_uploads:/app/uploads
       - rag_storage:/app/storage
     restart: unless-stopped
 
@@ -102,6 +103,9 @@ services:
         condition: service_healthy
       rag-service:
         condition: service_started
+    volumes:
+      - backend_uploads:/app/uploads
+      - rag_storage:/app/rag_storage
     restart: unless-stopped
     command: uv run celery -A app.celery_app worker --loglevel=info
 
