@@ -14,6 +14,10 @@ import {
   DocumentRead,
   DocumentShareRequest,
   DocumentShareResponse,
+  DocumentArchiveRequest,
+  DocumentCommentCreate,
+  DocumentCommentUpdate,
+  DocumentCommentRead,
   QuizGenerateRequest,
   QuizRead,
   AttemptSubmit,
@@ -29,6 +33,16 @@ import {
   AnalyticsResponse,
   StudentPerformanceTrend,
   WeakTopicsSummary,
+  SubjectRead,
+  SubjectDetailRead,
+  SubjectCreate,
+  EnrollResponse,
+  PracticeStartRequest,
+  PracticeQuestionRead,
+  PracticeAnswerSubmit,
+  PracticeAnswerResult,
+  PracticeSessionRead,
+  PracticeSessionDetail,
 } from '@/lib/types';
 
 // ── Auth ───────────────────────────────────────────────────────────────────
@@ -76,6 +90,8 @@ type DocUploadMeta = {
   year: string;
   official_duration_minutes?: number;
   instructions?: string;
+  document_category?: string;
+  subject_id?: string;
 };
 
 function buildDocFormData(file: File, metadata: DocUploadMeta): FormData {
@@ -89,6 +105,12 @@ function buildDocFormData(file: File, metadata: DocUploadMeta): FormData {
   }
   if (metadata.instructions) {
     formData.append('instructions', metadata.instructions);
+  }
+  if (metadata.document_category) {
+    formData.append('document_category', metadata.document_category);
+  }
+  if (metadata.subject_id) {
+    formData.append('subject_id', metadata.subject_id);
   }
   return formData;
 }
@@ -130,8 +152,9 @@ export const documentAPI = {
     return response.data;
   },
 
-  archive: async (id: string): Promise<DocumentRead> => {
-    const response = await apiClient.patch<DocumentRead>(`${API_ENDPOINTS.DOCUMENT_DETAIL(id)}/archive`);
+  archive: async (id: string, reason?: string): Promise<DocumentRead> => {
+    const body: DocumentArchiveRequest = { reason };
+    const response = await apiClient.patch<DocumentRead>(`${API_ENDPOINTS.DOCUMENT_DETAIL(id)}/archive`, body);
     return response.data;
   },
 
@@ -151,6 +174,41 @@ export const documentAPI = {
 
   unshare: async (docId: string, studentId: string): Promise<void> => {
     await apiClient.delete(API_ENDPOINTS.DOCUMENT_UNSHARE(docId, studentId));
+  },
+
+  /** Get the URL for viewing a document PDF inline */
+  getPdfUrl: (id: string): string => {
+    const base = typeof window !== 'undefined' ? window.location.origin : '';
+    return `${base}${API_ENDPOINTS.DOCUMENT_PDF(id)}`;
+  },
+
+  // ── Comments ─────────────────────────────────────────────────────────────
+
+  listComments: async (docId: string): Promise<DocumentCommentRead[]> => {
+    const response = await apiClient.get<DocumentCommentRead[]>(
+      `${API_ENDPOINTS.DOCUMENT_DETAIL(docId)}/comments`,
+    );
+    return response.data;
+  },
+
+  addComment: async (docId: string, data: DocumentCommentCreate): Promise<DocumentCommentRead> => {
+    const response = await apiClient.post<DocumentCommentRead>(
+      `${API_ENDPOINTS.DOCUMENT_DETAIL(docId)}/comments`,
+      data,
+    );
+    return response.data;
+  },
+
+  updateComment: async (docId: string, commentId: string, data: DocumentCommentUpdate): Promise<DocumentCommentRead> => {
+    const response = await apiClient.patch<DocumentCommentRead>(
+      `${API_ENDPOINTS.DOCUMENT_DETAIL(docId)}/comments/${commentId}`,
+      data,
+    );
+    return response.data;
+  },
+
+  deleteComment: async (docId: string, commentId: string): Promise<void> => {
+    await apiClient.delete(`${API_ENDPOINTS.DOCUMENT_DETAIL(docId)}/comments/${commentId}`);
   },
 };
 
@@ -317,6 +375,90 @@ export const chatAPI = {
 export const healthAPI = {
   check: async () => {
     const response = await apiClient.get(API_ENDPOINTS.HEALTH);
+    return response.data;
+  },
+};
+
+// ── Subjects ──────────────────────────────────────────────────────────────
+
+export const subjectAPI = {
+  list: async (level?: string): Promise<SubjectRead[]> => {
+    const params = level ? `?level=${encodeURIComponent(level)}` : '';
+    const response = await apiClient.get<SubjectRead[]>(`${API_ENDPOINTS.SUBJECTS}${params}`);
+    return response.data;
+  },
+
+  get: async (id: string): Promise<SubjectDetailRead> => {
+    const response = await apiClient.get<SubjectDetailRead>(API_ENDPOINTS.SUBJECT_DETAIL(id));
+    return response.data;
+  },
+
+  create: async (data: SubjectCreate): Promise<SubjectRead> => {
+    const response = await apiClient.post<SubjectRead>(API_ENDPOINTS.SUBJECTS, data);
+    return response.data;
+  },
+
+  enroll: async (subjectIds: string[]): Promise<EnrollResponse> => {
+    const response = await apiClient.post<EnrollResponse>(API_ENDPOINTS.SUBJECT_ENROLL, {
+      subject_ids: subjectIds,
+    });
+    return response.data;
+  },
+
+  unenroll: async (subjectId: string): Promise<void> => {
+    await apiClient.delete(API_ENDPOINTS.SUBJECT_UNENROLL(subjectId));
+  },
+
+  getDocuments: async (subjectId: string): Promise<DocumentRead[]> => {
+    const response = await apiClient.get<DocumentRead[]>(API_ENDPOINTS.SUBJECT_DOCUMENTS(subjectId));
+    return response.data;
+  },
+
+  seedDefaults: async (): Promise<SubjectRead[]> => {
+    const response = await apiClient.post<SubjectRead[]>(API_ENDPOINTS.SUBJECT_SEED);
+    return response.data;
+  },
+};
+
+// ── Practice ──────────────────────────────────────────────────────────────
+
+export const practiceAPI = {
+  start: async (request: PracticeStartRequest): Promise<PracticeSessionRead> => {
+    const response = await apiClient.post<PracticeSessionRead>(API_ENDPOINTS.PRACTICE_START, request);
+    return response.data;
+  },
+
+  getNextQuestion: async (sessionId: string): Promise<PracticeQuestionRead> => {
+    const response = await apiClient.get<PracticeQuestionRead>(API_ENDPOINTS.PRACTICE_NEXT_QUESTION(sessionId));
+    return response.data;
+  },
+
+  submitAnswer: async (sessionId: string, answer: PracticeAnswerSubmit): Promise<PracticeAnswerResult> => {
+    const response = await apiClient.post<PracticeAnswerResult>(
+      API_ENDPOINTS.PRACTICE_SUBMIT_ANSWER(sessionId),
+      answer,
+    );
+    return response.data;
+  },
+
+  complete: async (sessionId: string): Promise<PracticeSessionRead> => {
+    const response = await apiClient.post<PracticeSessionRead>(API_ENDPOINTS.PRACTICE_COMPLETE(sessionId));
+    return response.data;
+  },
+
+  get: async (sessionId: string): Promise<PracticeSessionDetail> => {
+    const response = await apiClient.get<PracticeSessionDetail>(API_ENDPOINTS.PRACTICE_SESSION_DETAIL(sessionId));
+    return response.data;
+  },
+
+  list: async (skip = 0, limit = 50, subjectId?: string): Promise<PracticeSessionRead[]> => {
+    const params = new URLSearchParams();
+    params.append('skip', String(skip));
+    params.append('limit', String(limit));
+    if (subjectId) params.append('subject_id', subjectId);
+    const response = await apiClient.get<PracticeSessionRead[]>(
+      `${API_ENDPOINTS.PRACTICE_SESSIONS}?${params.toString()}`,
+    );
     return response.data;
   },
 };

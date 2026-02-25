@@ -1,7 +1,11 @@
 .PHONY: help install sync dev-all dev-backend dev-rag dev-frontend \
-       docker-up docker-down docker-logs \
+	docker-up docker-down docker-down-safe docker-logs docker-reset-dangerous db-backup \
        db-migrate db-upgrade db-seed \
        lint format test test-backend test-rag test-frontend clean
+
+POSTGRES_USER ?= exam_prep
+POSTGRES_DB ?= exam_prep
+BACKUP_DIR ?= backups
 
 # ── Meta ──────────────────────────────────────────────────────────────────────
 
@@ -21,7 +25,10 @@ help:
 	@echo ""
 	@echo "Docker:"
 	@echo "  make docker-up        Start all services with Docker Compose"
-	@echo "  make docker-down      Stop all services"
+	@echo "  make docker-down      Stop all services (safe, keeps volumes)"
+	@echo "  make docker-down-safe Safe stop (no volume deletion)"
+	@echo "  make db-backup        Backup PostgreSQL to backups/*.sql"
+	@echo "  make docker-reset-dangerous  DANGER: backup + destroy volumes"
 	@echo "  make docker-logs      Tail service logs"
 	@echo ""
 	@echo "Database:"
@@ -73,10 +80,37 @@ docker-up:
 	@echo "  RAG:       http://localhost:8001/docs"
 
 docker-down:
+	$(MAKE) docker-down-safe
+
+docker-down-safe:
 	docker compose down
 
 docker-logs:
 	docker compose logs -f
+
+db-backup:
+	@mkdir -p $(BACKUP_DIR)
+	@if ! docker compose ps postgres | grep -q "Up"; then \
+		echo "Starting postgres for backup..."; \
+		docker compose up -d postgres; \
+		sleep 3; \
+	fi
+	@backup_file="$(BACKUP_DIR)/postgres_$(shell date +%Y%m%d_%H%M%S).sql"; \
+	docker compose exec -T postgres pg_dump -U $(POSTGRES_USER) -d $(POSTGRES_DB) > $$backup_file; \
+	echo "✅ PostgreSQL backup created: $$backup_file"
+
+docker-reset-dangerous:
+	@echo "⚠️  DANGER: This will permanently delete Docker volumes (including PostgreSQL data)."
+	@echo "A PostgreSQL backup will be created first."
+	@printf "Type RESET to continue: "; \
+	read ans; \
+	if [ "$$ans" != "RESET" ]; then \
+		echo "Aborted."; \
+		exit 1; \
+	fi
+	@$(MAKE) db-backup
+	docker compose down -v --remove-orphans
+	@echo "✅ Destructive reset completed. Volumes removed after backup."
 
 # ── Database ──────────────────────────────────────────────────────────────────
 

@@ -6,7 +6,7 @@ import { useCallback } from 'react';
 import useSWR, { SWRConfiguration } from 'swr';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/lib/stores/auth';
-import { authAPI, documentAPI, quizAPI, attemptAPI, progressAPI, adminAPI, apiClient } from '@/lib/api';
+import { authAPI, documentAPI, quizAPI, attemptAPI, progressAPI, adminAPI, subjectAPI, practiceAPI, apiClient } from '@/lib/api';
 import {
   UserCreate,
   UserLogin,
@@ -19,6 +19,9 @@ import {
   StudentSummary,
   StudentDetail,
   AnalyticsResponse,
+  SubjectRead,
+  PracticeSessionRead,
+  PracticeStartRequest,
 } from '@/lib/types';
 import { API_ENDPOINTS } from '@/config/constants';
 
@@ -272,6 +275,91 @@ export const useAdminAnalytics = (days = 30, swrConfig?: SWRConfiguration) => {
     analytics,
     isLoading,
     error,
+    mutate,
+  };
+};
+
+// ── useSubjects Hook ──────────────────────────────────────────────────────
+
+export const useSubjects = (level?: string, swrConfig?: SWRConfiguration) => {
+  const { data: subjects, error, isLoading, mutate } = useSWR<SubjectRead[]>(
+    [API_ENDPOINTS.SUBJECTS, level],
+    () => subjectAPI.list(level),
+    swrConfig,
+  );
+
+  const enroll = useCallback(
+    async (subjectIds: string[]) => {
+      try {
+        const result = await subjectAPI.enroll(subjectIds);
+        await mutate();
+        return { success: true, data: result };
+      } catch (error: any) {
+        return {
+          success: false,
+          error: error.response?.data?.detail || 'Failed to enroll',
+        };
+      }
+    },
+    [mutate],
+  );
+
+  const unenroll = useCallback(
+    async (subjectId: string) => {
+      try {
+        await subjectAPI.unenroll(subjectId);
+        await mutate();
+        return { success: true };
+      } catch (error: any) {
+        return {
+          success: false,
+          error: error.response?.data?.detail || 'Failed to unenroll',
+        };
+      }
+    },
+    [mutate],
+  );
+
+  return {
+    subjects: subjects || [],
+    isLoading,
+    error,
+    enroll,
+    unenroll,
+    mutate,
+  };
+};
+
+// ── usePracticeSessions Hook ──────────────────────────────────────────────
+
+export const usePracticeSessions = (swrConfig?: SWRConfiguration) => {
+  const { data: sessions, error, isLoading, mutate } = useSWR<PracticeSessionRead[]>(
+    API_ENDPOINTS.PRACTICE_SESSIONS,
+    () => practiceAPI.list(),
+    swrConfig,
+  );
+
+  const startSession = useCallback(
+    async (request: PracticeStartRequest) => {
+      try {
+        const session = await practiceAPI.start(request);
+        await mutate();
+        return { success: true, data: session };
+      } catch (error: any) {
+        return {
+          success: false,
+          error: error.response?.data?.detail || 'Failed to start practice',
+        };
+      }
+    },
+    [mutate],
+  );
+
+  return {
+    sessions: sessions || [],
+    isLoading,
+    error,
+    startSession,
     mutate,
   };
 };

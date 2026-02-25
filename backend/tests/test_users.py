@@ -17,8 +17,9 @@ def test_register_user(client: TestClient):
     )
     assert response.status_code == 201
     data = response.json()
-    assert data["email"] == "u1@ex.com"
-    assert data["full_name"] == "Test User"
+    assert "access_token" in data
+    assert data["user"]["email"] == "u1@ex.com"
+    assert data["user"]["full_name"] == "Test User"
 
 
 def test_register_duplicate_email(client: TestClient):
@@ -100,9 +101,14 @@ def test_get_current_user(client: TestClient):
     )
     assert register_response.status_code == 201
     
-    # Get current user with auth (will test this properly when auth is implemented)
-    # For now, just verify registration worked
-    user = register_response.json()
+    # Get current user with auth
+    token = register_response.json()["access_token"]
+    me_resp = client.get(
+        "/api/users/me",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert me_resp.status_code == 200
+    user = me_resp.json()
     assert user["email"] == "u4@ex.com"
     assert user["full_name"] == "Test User"
 

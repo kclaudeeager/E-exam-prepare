@@ -6,6 +6,7 @@ from typing import Any
 import httpx
 
 from app.config import settings
+from app.services.rag_cache import cache_get, cache_set
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,11 @@ class RAGClient:
         top_k: int = 10,
         filters: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        params = {"query": query, "collection": collection, "top_k": top_k}
+        cached = cache_get("retrieve", params)
+        if cached is not None:
+            return cached
+
         r = self._http.post(
             "/retrieve/",
             json={
@@ -61,7 +67,9 @@ class RAGClient:
             },
         )
         r.raise_for_status()
-        return r.json()
+        result = r.json()
+        cache_set("retrieve", params, result)
+        return result
 
     # ── query (full RAG with LLM synthesis) ───────────────────────────────
 
@@ -74,6 +82,14 @@ class RAGClient:
         filters: dict[str, Any] | None = None,
         chat_history: list[dict[str, str]] | None = None,
     ) -> dict[str, Any]:
+        # Skip cache for contextual follow-up questions (contain chat history)
+        use_cache = not chat_history
+        if use_cache:
+            params = {"question": question, "collection": collection, "top_k": top_k}
+            cached = cache_get("query", params)
+            if cached is not None:
+                return cached
+
         payload: dict[str, Any] = {
             "question": question,
             "collection": collection,
@@ -84,7 +100,11 @@ class RAGClient:
             payload["chat_history"] = chat_history
         r = self._http.post("/query/", json=payload)
         r.raise_for_status()
-        return r.json()
+        result = r.json()
+
+        if use_cache:
+            cache_set("query", params, result)
+        return result
 
     # ── direct LLM (no index required) ─────────────────────────────────────
 
@@ -111,6 +131,22 @@ class RAGClient:
             "/explore/",
             json={"entity": entity, "collection": collection, "depth": depth},
         )
+        r.raise_for_status()
+        return r.json()
+
+    # ── OCR for handwritten answers ───────────────────────────────────────
+
+    def ocr_handwritten(
+        self,
+        image_base64: str,
+        *,
+        prompt: str | None = None,
+    ) -> dict[str, Any]:
+        """Send a handwritten answer image to the RAG service for OCR."""
+        payload: dict[str, Any] = {"image_base64": image_base64}
+        if prompt:
+            payload["prompt"] = prompt
+        r = self._http.post("/ocr/handwritten", json=payload, timeout=90.0)
         r.raise_for_status()
         return r.json()
 

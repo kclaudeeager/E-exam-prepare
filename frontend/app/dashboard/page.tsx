@@ -58,6 +58,18 @@ export default function DashboardPage() {
             </div>
 
             <div className="grid gap-4 md:grid-cols-3">
+              <Link href={ROUTES.STUDENT_SUBJECTS}>
+                <div className="card cursor-pointer hover:shadow-md border-blue-200 bg-blue-50/30">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="font-semibold text-gray-900">My Subjects</h3>
+                      <p className="text-sm text-gray-600">Enroll &amp; study by subject</p>
+                    </div>
+                    <div className="text-3xl">📚</div>
+                  </div>
+                </div>
+              </Link>
+
               <Link href={ROUTES.STUDENT_BROWSE}>
                 <div className="card cursor-pointer hover:shadow-md border-blue-100">
                   <div className="flex items-center justify-between">
@@ -66,18 +78,6 @@ export default function DashboardPage() {
                       <p className="text-sm text-gray-600">Browse past exam papers</p>
                     </div>
                     <div className="text-3xl">📄</div>
-                  </div>
-                </div>
-              </Link>
-
-              <Link href={ROUTES.STUDENT_DOCUMENTS}>
-                <div className="card cursor-pointer hover:shadow-md border-indigo-100">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h3 className="font-semibold text-gray-900">My Documents</h3>
-                      <p className="text-sm text-gray-600">Upload &amp; manage your materials</p>
-                    </div>
-                    <div className="text-3xl">📂</div>
                   </div>
                 </div>
               </Link>
@@ -114,18 +114,6 @@ export default function DashboardPage() {
                       <p className="text-sm text-gray-600">View your learning analytics</p>
                     </div>
                     <div className="text-3xl">📊</div>
-                  </div>
-                </div>
-              </Link>
-
-              <Link href={ROUTES.STUDENT_ATTEMPTS}>
-                <div className="card cursor-pointer hover:shadow-md">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h3 className="font-semibold text-gray-900">Past Attempts</h3>
-                      <p className="text-sm text-gray-600">Review your quiz history</p>
-                    </div>
-                    <div className="text-3xl">📚</div>
                   </div>
                 </div>
               </Link>

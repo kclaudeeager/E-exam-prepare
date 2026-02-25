@@ -28,6 +28,7 @@ from app.db.models import (
     QuizModeEnum,
     QuizQuestion,
     RoleEnum,
+    Subject,
     Topic,
     User,
 )
@@ -71,6 +72,13 @@ def _get_best_collection(db: Session) -> str | None:
     if doc:
         return f"{doc.level.value}_{doc.subject}".replace(" ", "_")
     return None
+
+
+def _get_collection_name(doc: Document) -> str | None:
+    """Get the RAG collection name for a document."""
+    if doc.collection_name:
+        return doc.collection_name
+    return f"{doc.level.value}_{doc.subject}".replace(" ", "_")
 
 
 def _get_or_create_topic(db: Session, name: str, subject: str = "General") -> Topic:
@@ -227,164 +235,179 @@ def generate_quiz(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Generate a quiz from a specific exam paper.
-    
-    Required fields:
-    - mode: adaptive, topic-focused, or real-exam
-    - document_id: which exam paper to generate questions from
-    - subject: subject area within the document
-    
-    The system will:
-    1. Retrieve questions from the specified document
-    2. Filter by topics if provided
-    3. Generate via RAG if not enough local questions exist
+    """Generate a quiz from a subject (across all its papers).
+
+    Modes:
+    - adaptive / topic-focused: pulls questions from ALL ingested papers
+      in this subject, mixing them together.
+    - real-exam: simulates a single exam paper. If document_id is given,
+      that paper is used; otherwise a random ingested paper from the
+      subject is chosen.
     """
-    # Validate document access and existence
-    doc = db.query(Document).filter(Document.id == body.document_id).first()
-    if not doc:
+    # ── Validate subject ──────────────────────────────────────────────────
+    subject_obj = db.query(Subject).filter(Subject.id == body.subject_id).first()
+    if not subject_obj:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Subject not found")
+
+    # All ingested documents in this subject
+    subject_docs = (
+        db.query(Document)
+        .filter(
+            Document.subject_id == body.subject_id,
+            Document.ingestion_status == IngestionStatusEnum.COMPLETED,
+        )
+        .all()
+    )
+    if not subject_docs:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Document not found",
-        )
-
-    # Check user has access to this document
-    is_owner = doc.uploaded_by == current_user.id
-    is_shared = (
-        db.query(DocumentShare)
-        .filter(
-            DocumentShare.document_id == body.document_id,
-            DocumentShare.shared_with_user_id == current_user.id,
-        )
-        .first()
-        is not None
-    )
-    # A student whose education_level is NULL can access ALL admin-designated
-    # documents (same fallback logic as the listing endpoint).
-    is_level_designated = (
-        not doc.is_personal
-        and (
-            current_user.education_level is None
-            or doc.level == current_user.education_level
-        )
-    )
-    is_admin = current_user.role == RoleEnum.ADMIN
-
-    if not (is_owner or is_shared or is_level_designated or is_admin):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You do not have access to this document",
+            detail="No ingested exam papers found for this subject. Upload and ingest papers first.",
         )
 
     mode = QuizModeEnum(body.mode.value)
 
-    # Start with questions from the specified document
-    question_query = db.query(Question).filter(Question.document_id == body.document_id)
+    # ── Real-exam: pick or validate a single paper ────────────────────────
+    exam_doc: Document | None = None
+    if mode == QuizModeEnum.REAL_EXAM:
+        if body.document_id:
+            exam_doc = db.query(Document).filter(
+                Document.id == body.document_id,
+                Document.subject_id == body.subject_id,
+                Document.ingestion_status == IngestionStatusEnum.COMPLETED,
+            ).first()
+            if not exam_doc:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Specified exam paper not found or not ingested in this subject.",
+                )
+        else:
+            # Randomly pick a paper from the subject
+            exam_doc = (
+                db.query(Document)
+                .filter(
+                    Document.subject_id == body.subject_id,
+                    Document.ingestion_status == IngestionStatusEnum.COMPLETED,
+                    Document.document_category == "exam_paper",
+                )
+                .order_by(func.random())
+                .first()
+            )
+            if not exam_doc:
+                exam_doc = subject_docs[0]  # fallback to any doc
+
+    # ── Build question pool ───────────────────────────────────────────────
+    subject_doc_ids = [d.id for d in subject_docs]
     topic_names_for_rag: list[str] | None = None
 
-    if mode == QuizModeEnum.ADAPTIVE:
-        # Find weak topics within this subject
-        weak = (
-            db.query(Progress)
-            .filter(
-                Progress.student_id == current_user.id,
-                Progress.accuracy < settings.WEAK_TOPIC_THRESHOLD,
-            )
-            .all()
-        )
-        if weak:
-            weak_topic_ids = [p.topic_id for p in weak]
-            question_query = question_query.filter(Question.topic_id.in_(weak_topic_ids))
-            topic_names_for_rag = [p.topic.name for p in weak if p.topic]
-        # Fallback: if no weak topics, use the subject topics
-        if not topic_names_for_rag:
-            topic_names_for_rag = [body.subject]
-
-    elif mode == QuizModeEnum.TOPIC_FOCUSED:
-        # Filter by selected topics within the document
-        if body.topics:
-            topic_names_for_rag = body.topics
-            question_query = question_query.filter(
-                Question.topic.has(Topic.name.in_(body.topics))
-            )
-        else:
-            # If no topics specified, use the subject
-            topic_names_for_rag = [body.subject]
-
-    elif mode == QuizModeEnum.REAL_EXAM:
-        # Use all questions from the exam, in order
+    if mode == QuizModeEnum.REAL_EXAM:
+        # Questions from the single chosen paper only
+        assert exam_doc is not None
+        question_query = db.query(Question).filter(Question.document_id == exam_doc.id)
         topic_names_for_rag = [body.subject]
+    else:
+        # Questions from ALL papers in the subject
+        question_query = db.query(Question).filter(
+            Question.document_id.in_(subject_doc_ids)
+        )
 
-    # Check local DB first
+        if mode == QuizModeEnum.ADAPTIVE:
+            weak = (
+                db.query(Progress)
+                .filter(
+                    Progress.student_id == current_user.id,
+                    Progress.accuracy < settings.WEAK_TOPIC_THRESHOLD,
+                )
+                .all()
+            )
+            if weak:
+                weak_topic_ids = [p.topic_id for p in weak]
+                question_query = question_query.filter(Question.topic_id.in_(weak_topic_ids))
+                topic_names_for_rag = [p.topic.name for p in weak if p.topic]
+            if not topic_names_for_rag:
+                topic_names_for_rag = [body.subject]
+
+        elif mode == QuizModeEnum.TOPIC_FOCUSED:
+            if body.topics:
+                topic_names_for_rag = body.topics
+                question_query = question_query.filter(
+                    Question.topic.has(Topic.name.in_(body.topics))
+                )
+            else:
+                topic_names_for_rag = [body.subject]
+
     questions = question_query.order_by(func.random()).limit(body.count).all()
 
-    # If not enough, generate via RAG from this document's collection
-    if len(questions) < body.count and doc.collection_name:
+    # ── Generate via RAG if not enough local questions ────────────────────
+    if len(questions) < body.count:
+        # Pick the best collection(s) for RAG generation
+        if mode == QuizModeEnum.REAL_EXAM and exam_doc:
+            collections = [_get_collection_name(exam_doc)]
+        else:
+            collections = list({_get_collection_name(d) for d in subject_docs if _get_collection_name(d)})
+
         needed = body.count - len(questions)
-        logger.info(
-            "Only %d local questions from document, generating %d via RAG from collection %s",
-            len(questions),
-            needed,
-            doc.collection_name,
-        )
-        # Generate with this document's collection
-        client = get_rag_client()
-        try:
-            topic_hint = f"Focus on {body.subject} and topics: {', '.join(topic_names_for_rag)}"
-            prompt = _QUESTION_GEN_PROMPT.format(count=needed, topic_hint=topic_hint)
-            result = client.query(question=prompt, collection=doc.collection_name, top_k=15)
-            answer_text = result.get("answer", "")
-            parsed = _parse_questions_json(answer_text)
-            
-            for item in parsed[:needed]:
-                text = item.get("text", "").strip()
-                if not text or len(text) < 10:
-                    continue
+        for coll in collections[:3]:  # try up to 3 collections
+            if needed <= 0:
+                break
+            logger.info("Generating %d questions via RAG from collection %s", needed, coll)
+            try:
+                topic_hint = f"Focus on {body.subject}"
+                if topic_names_for_rag:
+                    topic_hint += f" and topics: {', '.join(topic_names_for_rag)}"
+                prompt = _QUESTION_GEN_PROMPT.format(count=needed, topic_hint=topic_hint)
+                client = get_rag_client()
+                result = client.query(question=prompt, collection=coll, top_k=15)
+                answer_text = result.get("answer", "")
+                parsed = _parse_questions_json(answer_text)
 
-                # Check duplicate
-                exists = db.query(Question).filter(Question.text == text).first()
-                if exists:
-                    questions.append(exists)
-                    continue
+                # Find a source doc for linking the generated questions
+                source_doc = exam_doc if exam_doc else subject_docs[0]
 
-                q_type_str = item.get("question_type", "mcq").lower()
-                q_type = QuestionTypeEnum.MCQ if "mcq" in q_type_str else QuestionTypeEnum.SHORT_ANSWER
+                for item in parsed[:needed]:
+                    text = item.get("text", "").strip()
+                    if not text or len(text) < 10:
+                        continue
+                    exists = db.query(Question).filter(Question.text == text).first()
+                    if exists:
+                        questions.append(exists)
+                        needed -= 1
+                        continue
 
-                options_list = item.get("options")
-                options_str = "|".join(options_list) if options_list and isinstance(options_list, list) else None
+                    q_type_str = item.get("question_type", "mcq").lower()
+                    q_type = QuestionTypeEnum.MCQ if "mcq" in q_type_str else QuestionTypeEnum.SHORT_ANSWER
+                    options_list = item.get("options")
+                    options_str = "|".join(options_list) if options_list and isinstance(options_list, list) else None
+                    topic_name = item.get("topic", body.subject)
+                    topic = _get_or_create_topic(db, topic_name, subject=body.subject)
 
-                topic_name = item.get("topic", body.subject)
-                topic = _get_or_create_topic(db, topic_name, subject=body.subject)
+                    q = Question(
+                        text=text,
+                        question_type=q_type,
+                        options=options_str,
+                        correct_answer=item.get("correct_answer"),
+                        difficulty=item.get("difficulty", "medium"),
+                        topic_id=topic.id,
+                        document_id=source_doc.id,
+                    )
+                    db.add(q)
+                    questions.append(q)
+                    needed -= 1
 
-                q = Question(
-                    text=text,
-                    question_type=q_type,
-                    options=options_str,
-                    correct_answer=item.get("correct_answer"),
-                    difficulty=item.get("difficulty", "medium"),
-                    topic_id=topic.id,
-                    document_id=body.document_id,  # Link to source document
-                )
-                db.add(q)
-                questions.append(q)
-
-            db.flush()
-        except Exception as e:
-            logger.error("RAG generation failed: %s", e)
-            # Continue with what we have
+                db.flush()
+            except Exception as e:
+                logger.error("RAG generation from %s failed: %s", coll, e)
 
     if not questions:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="No questions available in this document. Ensure it has been ingested.",
+            detail="No questions available for this subject. Ensure papers have been ingested.",
         )
 
-    # Limit to requested count
     questions = questions[: body.count]
 
-    # ── Persist quiz with document reference ──────────────────────────────
-    duration = None
-    if mode == QuizModeEnum.REAL_EXAM:
-        duration = doc.official_duration_minutes if doc.official_duration_minutes else body.count * 2
+    # ── Persist quiz ──────────────────────────────────────────────────────
+    if mode == QuizModeEnum.REAL_EXAM and exam_doc:
+        duration = exam_doc.official_duration_minutes or body.count * 2
     else:
         duration = body.count * 2
 
@@ -403,7 +426,7 @@ def generate_quiz(
     db.commit()
     db.refresh(quiz)
 
-    # ── Build response ───────────────────────────────────────────────────
+    # ── Build response ────────────────────────────────────────────────────
     question_reads = [
         QuestionRead(
             id=q.id,
@@ -412,7 +435,7 @@ def generate_quiz(
             difficulty=q.difficulty,
             options=q.options.split("|") if q.options else None,
             question_type=q.question_type.value,
-            source_document=doc.filename,
+            source_document=q.source_document.filename if q.source_document else None,
         )
         for q in questions
     ]
@@ -424,7 +447,7 @@ def generate_quiz(
         instructions=quiz.instructions,
         questions=question_reads,
         question_count=quiz.question_count,
-        document_id=body.document_id,
+        document_id=exam_doc.id if exam_doc else None,
         created_at=quiz.created_at,
     )
 

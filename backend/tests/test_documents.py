@@ -39,7 +39,7 @@ def _create_admin_token(client: TestClient) -> str:
     return response.json()["access_token"]
 
 
-def _create_student_token(client: TestClient) -> str:
+def _create_student_token(client: TestClient, level: str = "S3") -> str:
     """Helper: Create student user and return JWT token."""
     unique_id = str(uuid.uuid4())[:8]
     email = f"student_{unique_id}@ex.com"
@@ -53,6 +53,7 @@ def _create_student_token(client: TestClient) -> str:
             "password": password,
             "full_name": "Student User",
             "role": "student",
+            "education_level": level,
         },
     )
     
@@ -102,7 +103,7 @@ def test_upload_document_as_admin(client: TestClient, db: Session):
     pdf = _create_pdf_file()
 
     response = client.post(
-        "/api/documents/",
+        "/api/documents/admin",
         data={
             "subject": "Mathematics",
             "level": "S3",
@@ -130,7 +131,7 @@ def test_upload_document_as_student_fails(client: TestClient):
     pdf = _create_pdf_file()
 
     response = client.post(
-        "/api/documents/",
+        "/api/documents/admin",
         data={
             "subject": "Mathematics",
             "level": "S3",
@@ -149,7 +150,7 @@ def test_upload_document_without_auth_fails(client: TestClient):
     pdf = _create_pdf_file()
 
     response = client.post(
-        "/api/documents/",
+        "/api/documents/admin",
         data={
             "subject": "Mathematics",
             "level": "S3",
@@ -169,7 +170,7 @@ def test_list_documents(client: TestClient, db: Session):
     # Upload a document
     pdf = _create_pdf_file()
     upload_response = client.post(
-        "/api/documents/",
+        "/api/documents/admin",
         data={
             "subject": "Mathematics",
             "level": "S3",
@@ -182,7 +183,7 @@ def test_list_documents(client: TestClient, db: Session):
 
     # List as student
     response = client.get(
-        "/api/documents/",
+        "/api/documents",
         headers={"Authorization": f"Bearer {student_token}"},
     )
 
@@ -203,7 +204,7 @@ def test_list_documents_with_filters(client: TestClient, db: Session):
     for subject, level in [("Mathematics", "S3"), ("Physics", "S3"), ("Biology", "S6")]:
         pdf = _create_pdf_file()
         client.post(
-            "/api/documents/",
+            "/api/documents/admin",
             data={
                 "subject": subject,
                 "level": level,
@@ -215,7 +216,7 @@ def test_list_documents_with_filters(client: TestClient, db: Session):
 
     # Filter by subject
     response = client.get(
-        "/api/documents/?subject=Mathematics",
+        "/api/documents?subject=Mathematics",
         headers={"Authorization": f"Bearer {student_token}"},
     )
 
@@ -225,7 +226,7 @@ def test_list_documents_with_filters(client: TestClient, db: Session):
 
     # Filter by level
     response = client.get(
-        "/api/documents/?level=S6",
+        "/api/documents?level=S6",
         headers={"Authorization": f"Bearer {student_token}"},
     )
 
@@ -236,7 +237,7 @@ def test_list_documents_with_filters(client: TestClient, db: Session):
 
 def test_list_documents_without_auth_fails(client: TestClient):
     """Test that unauthenticated users cannot list documents."""
-    response = client.get("/api/documents/")
+    response = client.get("/api/documents")
     assert response.status_code == 401
 
 
@@ -248,7 +249,7 @@ def test_get_document_by_id(client: TestClient, db: Session):
     # Upload a document
     pdf = _create_pdf_file()
     upload_response = client.post(
-        "/api/documents/",
+        "/api/documents/admin",
         data={
             "subject": "Mathematics",
             "level": "S3",
@@ -302,7 +303,7 @@ def test_upload_document_with_optional_fields(client: TestClient):
     pdf = _create_pdf_file()
 
     response = client.post(
-        "/api/documents/",
+        "/api/documents/admin",
         data={
             "subject": "English",
             "level": "S3",
@@ -325,7 +326,7 @@ def test_upload_document_minimal_fields(client: TestClient):
     pdf = _create_pdf_file()
 
     response = client.post(
-        "/api/documents/",
+        "/api/documents/admin",
         data={
             "subject": "History",
             "level": "S3",
@@ -350,7 +351,7 @@ def test_pagination_list_documents(client: TestClient):
     for i in range(5):
         pdf = _create_pdf_file()
         client.post(
-            "/api/documents/",
+            "/api/documents/admin",
             data={
                 "subject": "Mathematics",
                 "level": "S3",
@@ -362,7 +363,7 @@ def test_pagination_list_documents(client: TestClient):
 
     # Get first page (limit=2)
     response = client.get(
-        "/api/documents/?limit=2&skip=0",
+        "/api/documents?limit=2&skip=0",
         headers={"Authorization": f"Bearer {student_token}"},
     )
 
@@ -371,7 +372,7 @@ def test_pagination_list_documents(client: TestClient):
 
     # Get second page (limit=2)
     response = client.get(
-        "/api/documents/?limit=2&skip=2",
+        "/api/documents?limit=2&skip=2",
         headers={"Authorization": f"Bearer {student_token}"},
     )
 

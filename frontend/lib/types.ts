@@ -7,6 +7,8 @@ export type Role = 'student' | 'admin';
 export type EducationLevel = 'P6' | 'S3' | 'S6' | 'TTC';
 export type QuizMode = 'adaptive' | 'topic-focused' | 'real-exam';
 export type IngestionStatus = 'pending' | 'ingesting' | 'completed' | 'failed';
+export type DocumentCategory = 'exam_paper' | 'marking_scheme' | 'syllabus' | 'textbook' | 'notes' | 'other';
+export type PracticeStatus = 'in_progress' | 'completed' | 'abandoned';
 
 // ── User & Auth ────────────────────────────────────────────────────────────
 
@@ -65,13 +67,53 @@ export interface DocumentRead {
   level: string;
   year: string;
   uploaded_by: string;
+  uploader_name?: string;
   ingestion_status: IngestionStatus;
   is_personal: boolean;
   is_shared: boolean;
   official_duration_minutes?: number;
   is_archived: boolean;
   archived_at: string | null;
+  archived_by?: string;
+  archive_reason?: string;
+  archiver_name?: string;
+  comment_count?: number;
   created_at: string;
+  document_category?: DocumentCategory;
+  page_count?: number;
+  subject_id?: string;
+}
+
+export type CommentType = 'comment' | 'highlight' | 'issue';
+
+export interface DocumentCommentCreate {
+  content: string;
+  comment_type?: CommentType;
+  page_number?: number;
+  highlight_text?: string;
+}
+
+export interface DocumentCommentUpdate {
+  content?: string;
+  resolved?: boolean;
+}
+
+export interface DocumentCommentRead {
+  id: string;
+  document_id: string;
+  author_id: string;
+  author_name?: string;
+  content: string;
+  comment_type: CommentType;
+  page_number?: number;
+  highlight_text?: string;
+  resolved: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DocumentArchiveRequest {
+  reason?: string;
 }
 
 export interface DocumentShareRequest {
@@ -116,8 +158,9 @@ export interface QuestionRead {
 
 export interface QuizGenerateRequest {
   mode: QuizMode;
-  document_id: string;
-  subject: string;
+  subject_id: string;  // Primary: which subject to practice
+  subject: string;     // Subject name for RAG lookup
+  document_id?: string; // Only for real-exam (specific paper)
   topics?: string[];
   difficulty?: string;
   count?: number;
@@ -372,4 +415,113 @@ export interface ChatMessageRead {
 
 export interface ChatSessionDetail extends ChatSessionRead {
   messages: ChatMessageRead[];
+}
+
+// ── Subjects ──────────────────────────────────────────────────────────────
+
+export interface SubjectRead {
+  id: string;
+  name: string;
+  level: string;
+  description?: string;
+  icon?: string;
+  document_count: number;
+  enrolled: boolean;
+  created_at: string;
+}
+
+export interface SubjectDetailRead extends SubjectRead {
+  collection_name?: string;
+}
+
+export interface SubjectCreate {
+  name: string;
+  level: EducationLevel;
+  description?: string;
+  icon?: string;
+}
+
+export interface EnrollRequest {
+  subject_ids: string[];
+}
+
+export interface EnrollResponse {
+  enrolled_count: number;
+  subject_ids: string[];
+  message: string;
+}
+
+// ── Practice Mode ─────────────────────────────────────────────────────────
+
+export interface PracticeStartRequest {
+  subject_id: string;     // Required: which subject to practice
+  document_id?: string;   // Optional: restrict to single paper (real-exam)
+  question_count?: number;
+  difficulty?: string;
+  topics?: string[];
+  mode?: 'practice' | 'real_exam';  // practice = cross-paper, real_exam = single paper
+}
+
+export interface QuestionSourceReference {
+  page_number?: number;
+  document_name?: string;
+  document_id?: string;
+  content_snippet?: string;
+}
+
+export interface PracticeQuestionRead {
+  id: string;
+  question_number: number;
+  text: string;
+  question_type: string;
+  options?: string[];
+  topic?: string;
+  difficulty?: string;
+  total_questions: number;
+  source_references?: QuestionSourceReference[];
+}
+
+export interface PracticeAnswerSubmit {
+  question_id?: string;
+  question_text?: string;
+  answer_text?: string;
+  answer_image_base64?: string;
+}
+
+export interface SourceReference {
+  page_number?: number;
+  content: string;
+  score: number;
+  document_name?: string;
+  document_id?: string;
+}
+
+export interface PracticeAnswerResult {
+  question_text: string;
+  student_answer: string;
+  is_correct?: boolean;
+  score: number;
+  feedback: string;
+  correct_answer?: string;
+  source_references: SourceReference[];
+  was_handwritten: boolean;
+  ocr_text?: string;
+}
+
+export interface PracticeSessionRead {
+  id: string;
+  student_id: string;
+  subject_id?: string;
+  document_id?: string;
+  status: PracticeStatus;
+  total_questions: number;
+  answered_count: number;
+  correct_count: number;
+  accuracy: number;
+  created_at: string;
+  completed_at?: string;
+}
+
+export interface PracticeSessionDetail extends PracticeSessionRead {
+  answers: PracticeAnswerResult[];
 }

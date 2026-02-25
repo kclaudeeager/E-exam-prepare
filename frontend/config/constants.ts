@@ -15,7 +15,10 @@ export const ROUTES = {
   DASHBOARD: '/dashboard',
 
   // Student routes
+  STUDENT_SUBJECTS: '/student/subjects',
+  STUDENT_SUBJECT_DETAIL: (id: string) => `/student/subjects/${id}`,
   STUDENT_PRACTICE: '/student/practice',
+  STUDENT_PRACTICE_SESSION: (id: string) => `/student/practice/${id}`,
   STUDENT_PROGRESS: '/student/progress',
   STUDENT_ATTEMPTS: '/student/attempts',
   STUDENT_ATTEMPT_DETAIL: (id: string) => `/student/attempts/${id}`,
@@ -26,6 +29,7 @@ export const ROUTES = {
 
   // Admin routes
   ADMIN_DOCUMENTS: '/admin/documents',
+  ADMIN_DOCUMENT_DETAIL: (id: string) => `/admin/documents/${id}`,
   ADMIN_STUDENTS: '/admin/students',
   ADMIN_ANALYTICS: '/admin/analytics',
 };
@@ -40,7 +44,7 @@ export const API_ENDPOINTS = {
   UPDATE_ME: '/api/users/me',
 
   // Documents
-  DOCUMENTS: '/api/documents/',
+  DOCUMENTS: '/api/documents',
   DOCUMENT_DETAIL: (id: string) => `/api/documents/${id}`,
 
   // Quiz
@@ -48,14 +52,14 @@ export const API_ENDPOINTS = {
   QUIZ_DETAIL: (id: string) => `/api/quiz/${id}`,
 
   // Attempts
-  ATTEMPTS: '/api/attempts/',
+  ATTEMPTS: '/api/attempts',
   ATTEMPT_DETAIL: (id: string) => `/api/attempts/${id}`,
   ATTEMPT_REVIEW: (id: string) => `/api/attempts/${id}/review`,
   ATTEMPT_QUESTION_EXPLAIN: (attemptId: string, questionId: string) =>
     `/api/attempts/${attemptId}/questions/${questionId}/explain`,
 
   // Progress
-  PROGRESS: '/api/progress/',
+  PROGRESS: '/api/progress',
 
   // RAG
   RAG_QUERY: '/api/rag/query',
@@ -81,6 +85,25 @@ export const API_ENDPOINTS = {
   DOCUMENTS_STUDENT: '/api/documents/student',
   DOCUMENT_SHARE: (id: string) => `/api/documents/${id}/share`,
   DOCUMENT_UNSHARE: (docId: string, studentId: string) => `/api/documents/${docId}/share/${studentId}`,
+
+  // Subjects
+  SUBJECTS: '/api/subjects',
+  SUBJECT_DETAIL: (id: string) => `/api/subjects/${id}`,
+  SUBJECT_ENROLL: '/api/subjects/enroll',
+  SUBJECT_UNENROLL: (id: string) => `/api/subjects/enroll/${id}`,
+  SUBJECT_DOCUMENTS: (id: string) => `/api/subjects/${id}/documents`,
+  SUBJECT_SEED: '/api/subjects/seed-defaults',
+
+  // Practice
+  PRACTICE_SESSIONS: '/api/practice',
+  PRACTICE_START: '/api/practice/start',
+  PRACTICE_SESSION_DETAIL: (id: string) => `/api/practice/${id}`,
+  PRACTICE_NEXT_QUESTION: (id: string) => `/api/practice/${id}/next`,
+  PRACTICE_SUBMIT_ANSWER: (id: string) => `/api/practice/${id}/answer`,
+  PRACTICE_COMPLETE: (id: string) => `/api/practice/${id}/complete`,
+
+  // Documents extra
+  DOCUMENT_PDF: (id: string) => `/api/documents/${id}/pdf`,
 };
 
 // ── Constants ────────────────────────────────────────────────────────────
@@ -111,6 +134,15 @@ export const QUIZ_MODES = [
 ] as const;
 
 export const QUESTION_TYPES = ['multiple-choice', 'short-answer', 'essay'] as const;
+
+export const DOCUMENT_CATEGORIES = [
+  { value: 'exam_paper', label: 'Exam Paper', icon: '📝' },
+  { value: 'marking_scheme', label: 'Marking Scheme', icon: '✅' },
+  { value: 'syllabus', label: 'Syllabus', icon: '📋' },
+  { value: 'textbook', label: 'Textbook', icon: '📖' },
+  { value: 'notes', label: 'Notes', icon: '📒' },
+  { value: 'other', label: 'Other', icon: '📄' },
+] as const;
 
 // ── Thresholds & Config ────────────────────────────────────────────────
 

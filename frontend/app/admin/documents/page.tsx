@@ -2,10 +2,11 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { useAuth } from '@/lib/hooks';
 import { documentAPI } from '@/lib/api';
 import { DocumentRead } from '@/lib/types';
-import { EDUCATION_LEVELS, ROUTES } from '@/config/constants';
+import { EDUCATION_LEVELS, ROUTES, DOCUMENT_CATEGORIES } from '@/config/constants';
 
 
 const IN_PROGRESS: DocumentRead['ingestion_status'][] = ['pending', 'ingesting'];
@@ -220,23 +221,55 @@ export default function DocumentsPage() {
               <div className="flex-center"><p className="text-gray-600">Loading…</p></div>
             ) : displayed.length > 0 ? (
               <div className="space-y-3">
-                {displayed.map((doc) => (
+                {displayed.map((doc) => {
+                  const catInfo = DOCUMENT_CATEGORIES.find((c) => c.value === doc.document_category);
+                  return (
                   <div key={doc.id} className={`card ${
                     doc.is_archived ? 'border-amber-200 bg-amber-50' : ''
                   }`}>
                     <div className="flex items-start gap-3">
                       <div className="flex-1 min-w-0">
-                        <h3 className="font-semibold text-gray-900 truncate">{doc.filename}</h3>
+                        <div className="flex items-center gap-2 mb-0.5">
+                          <Link
+                            href={ROUTES.ADMIN_DOCUMENT_DETAIL(doc.id)}
+                            className="font-semibold text-blue-700 hover:text-blue-900 hover:underline truncate"
+                          >
+                            {catInfo?.icon || '📄'} {doc.filename}
+                          </Link>
+                          {doc.is_personal && (
+                            <span className="shrink-0 rounded-full bg-purple-100 px-2 py-0.5 text-[10px] font-medium text-purple-700">
+                              👤 Student
+                            </span>
+                          )}
+                          {(doc.comment_count ?? 0) > 0 && (
+                            <span className="shrink-0 rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-medium text-blue-700">
+                              💬 {doc.comment_count}
+                            </span>
+                          )}
+                        </div>
                         <p className="text-sm text-gray-600">
                           {doc.subject} · {doc.level} · {doc.year}
                         </p>
+                        {doc.uploader_name && (
+                          <p className="text-xs text-gray-500">
+                            Uploaded by {doc.uploader_name}
+                          </p>
+                        )}
                         {doc.official_duration_minutes && (
                           <p className="text-xs text-gray-500">Duration: {doc.official_duration_minutes} min</p>
                         )}
-                        {doc.is_archived && doc.archived_at && (
-                          <p className="mt-1 text-xs text-amber-700">
-                            Archived {new Date(doc.archived_at).toLocaleDateString()}
-                          </p>
+                        {doc.is_archived && (
+                          <div className="mt-1">
+                            {doc.archive_reason && (
+                              <p className="text-xs text-amber-800 italic">
+                                Reason: {doc.archive_reason}
+                              </p>
+                            )}
+                            <p className="text-xs text-amber-700">
+                              Archived {doc.archived_at ? new Date(doc.archived_at).toLocaleDateString() : ''}
+                              {doc.archiver_name && ` by ${doc.archiver_name}`}
+                            </p>
+                          </div>
                         )}
                       </div>
 
@@ -290,10 +323,19 @@ export default function DocumentsPage() {
                             {actionId === doc.id ? '…' : '🗄 Archive'}
                           </button>
                         )}
+
+                        {/* View detail link */}
+                        <Link
+                          href={ROUTES.ADMIN_DOCUMENT_DETAIL(doc.id)}
+                          className="rounded bg-gray-100 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-200"
+                        >
+                          👁 View
+                        </Link>
                       </div>
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             ) : (
               <div className="card text-center">

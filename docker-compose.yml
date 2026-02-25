@@ -40,6 +40,7 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-exam_prep}:${POSTGRES_PASSWORD:-exam_prep_dev}@postgres:5432/${POSTGRES_DB:-exam_prep}
       CELERY_BROKER_URL: redis://redis:6379/0
+      REDIS_URL: redis://redis:6379/0
       RAG_SERVICE_URL: http://rag-service:8001
     ports:
       - "8000:8000"
@@ -96,6 +97,7 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-exam_prep}:${POSTGRES_PASSWORD:-exam_prep_dev}@postgres:5432/${POSTGRES_DB:-exam_prep}
       CELERY_BROKER_URL: redis://redis:6379/0
+      REDIS_URL: redis://redis:6379/0
       RAG_SERVICE_URL: http://rag-service:8001
     depends_on:
       postgres:
@@ -104,6 +106,8 @@ services:
         condition: service_healthy
       rag-service:
         condition: service_started
+    healthcheck:
+      disable: true
     volumes:
       - backend_uploads:/app/uploads
       - rag_storage:/app/rag_storage

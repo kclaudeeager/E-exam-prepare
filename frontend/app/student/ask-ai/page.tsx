@@ -6,6 +6,7 @@ import { useAuth } from '@/lib/hooks';
 import { ragAPI, chatAPI, documentAPI, RAGQueryResponse } from '@/lib/api';
 import { DocumentRead, ChatSessionRead } from '@/lib/types';
 import { ROUTES } from '@/config/constants';
+import PDFViewerModal from '@/components/PDFViewerModal';
 
 interface Message {
   id: string;
@@ -34,12 +35,24 @@ function AskAIContent() {
   const [sessions, setSessions] = useState<ChatSessionRead[]>([]);
   const [showHistory, setShowHistory] = useState(false);
 
+  // Documents list for resolving source file_name → document_id
+  const [allDocuments, setAllDocuments] = useState<DocumentRead[]>([]);
+
+  // PDF viewer state for clickable source references
+  const [viewingSource, setViewingSource] = useState<{
+    documentId: string;
+    documentName: string;
+    page?: number;
+    totalPages?: number;
+  } | null>(null);
+
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Build collection list from ingested documents and set default
   useEffect(() => {
     documentAPI.list().then((docs: DocumentRead[]) => {
+      setAllDocuments(docs);
       const cols = Array.from(
         new Set(
           docs
@@ -134,6 +147,25 @@ function AskAIContent() {
       .filter((m) => m.id !== 'welcome' && !m.error)
       .map((m) => ({ role: m.role, content: m.content }));
   }, [messages]);
+
+  // Resolve file_name from RAG metadata to a document for PDF viewing
+  const handleOpenSource = useCallback(
+    (source: RAGQueryResponse['sources'][number]) => {
+      const fileName = source.metadata?.file_name as string | undefined;
+      if (!fileName) return;
+
+      const doc = allDocuments.find((d) => d.filename === fileName);
+      if (doc) {
+        setViewingSource({
+          documentId: doc.id,
+          documentName: doc.filename,
+          page: (source.metadata?.page_number as number) ?? undefined,
+          totalPages: doc.page_count ?? undefined,
+        });
+      }
+    },
+    [allDocuments],
+  );
 
   // Save message to session in the background (best-effort)
   const saveMessageToSession = useCallback(
@@ -425,20 +457,45 @@ function AskAIContent() {
 
                       {showSources === msg.id && (
                         <div className="mt-2 space-y-2">
-                          {msg.sources.map((src) => (
-                            <div
-                              key={src.rank}
-                              className="rounded-md bg-white border border-gray-200 p-2 text-xs text-gray-700"
-                            >
-                              <p className="font-medium text-gray-500 mb-1">
-                                Source #{src.rank} · score {src.score.toFixed(3)}
-                                {src.metadata?.file_name
-                                  ? ` · ${src.metadata.file_name}`
-                                  : ''}
-                              </p>
-                              <p className="line-clamp-4">{src.content}</p>
-                            </div>
-                          ))}
+                          {msg.sources.map((src) => {
+                            const fileName = src.metadata?.file_name as string | undefined;
+                            const pageNum = src.metadata?.page_number as number | undefined;
+                            const hasDoc = !!fileName && allDocuments.some((d) => d.filename === fileName);
+
+                            return (
+                              <div
+                                key={src.rank}
+                                className={`rounded-md bg-white border border-gray-200 p-2 text-xs text-gray-700 ${
+                                  hasDoc
+                                    ? 'cursor-pointer hover:border-blue-300 hover:bg-blue-50/50 transition-colors'
+                                    : ''
+                                }`}
+                                onClick={() => hasDoc && handleOpenSource(src)}
+                                role={hasDoc ? 'button' : undefined}
+                                tabIndex={hasDoc ? 0 : undefined}
+                                onKeyDown={(e) => {
+                                  if (hasDoc && (e.key === 'Enter' || e.key === ' ')) {
+                                    e.preventDefault();
+                                    handleOpenSource(src);
+                                  }
+                                }}
+                              >
+                                <div className="flex items-center gap-1 flex-wrap">
+                                  <p className="font-medium text-gray-500 mb-1">
+                                    Source #{src.rank} · score {src.score.toFixed(3)}
+                                    {fileName ? ` · ${fileName}` : ''}
+                                    {pageNum != null ? ` · p.${pageNum}` : ''}
+                                  </p>
+                                  {hasDoc && (
+                                    <span className="ml-auto text-blue-500 font-medium mb-1">
+                                      📄 Open →
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="line-clamp-4">{src.content}</p>
+                              </div>
+                            );
+                          })}
                         </div>
                       )}
                     </div>
@@ -486,6 +543,17 @@ function AskAIContent() {
         <p className="text-center text-xs text-gray-400">
           AI answers are generated from exam papers in the database. Always verify with your teacher.
         </p>
+
+        {/* PDF Viewer Modal for clickable source references */}
+        {viewingSource && (
+          <PDFViewerModal
+            documentId={viewingSource.documentId}
+            filename={viewingSource.documentName}
+            initialPage={viewingSource.page}
+            totalPages={viewingSource.totalPages}
+            onClose={() => setViewingSource(null)}
+          />
+        )}
       </main>
     </div>
   );

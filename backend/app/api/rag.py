@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from app.api.deps import get_current_user
 from app.db.models import User
 from app.services.rag_client import get_rag_client
+from app.services.rate_limiter import require_rag_rate_limit
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -54,9 +55,10 @@ def _proxy_error(exc: Exception, operation: str) -> HTTPException:
 
 
 @router.post("/query")
-def rag_query(
+async def rag_query(
     body: RAGQueryRequest,
     current_user: User = Depends(get_current_user),
+    _rl=Depends(require_rag_rate_limit),
 ):
     """Ask the RAG engine a question and get an LLM-synthesised answer with sources."""
     try:
@@ -76,9 +78,10 @@ def rag_query(
 
 
 @router.post("/retrieve")
-def rag_retrieve(
+async def rag_retrieve(
     body: RAGRetrieveRequest,
     current_user: User = Depends(get_current_user),
+    _rl=Depends(require_rag_rate_limit),
 ):
     """Retrieve top-k ranked chunks for a query (no LLM synthesis)."""
     try:

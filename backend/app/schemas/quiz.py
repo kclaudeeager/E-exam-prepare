@@ -21,11 +21,21 @@ class EducationLevel(str, Enum):
 
 
 class QuizGenerateRequest(BaseModel):
-    """POST /api/quiz/generate — now requires document selection."""
+    """POST /api/quiz/generate — subject-based quiz generation.
+
+    For adaptive & topic-focused modes:
+      - subject_id (required): pulls questions from ALL papers in this subject
+      - document_id is ignored
+    For real-exam mode:
+      - document_id (optional): specific paper to simulate.
+        If omitted, a paper is randomly chosen from the subject.
+      - subject_id (required): identifies the subject
+    """
 
     mode: QuizMode
-    document_id: uuid.UUID  # Required: which exam paper to practice from
-    subject: str  # Required: which subject area
+    subject_id: uuid.UUID  # Primary: which subject to practice
+    subject: str  # Subject name (for RAG collection lookup)
+    document_id: uuid.UUID | None = None  # Only for real-exam (pick a paper)
     topics: list[str] | None = None  # Optional: filter within subject
     difficulty: str = "medium"
     count: int = 15

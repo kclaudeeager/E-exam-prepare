@@ -15,11 +15,10 @@ export default function Navbar() {
 
   const studentLinks = [
     { href: ROUTES.DASHBOARD, label: 'Dashboard', icon: '🏠' },
+    { href: ROUTES.STUDENT_SUBJECTS, label: 'Subjects', icon: '📚' },
     { href: ROUTES.STUDENT_BROWSE, label: 'Exam Papers', icon: '📄' },
-    { href: ROUTES.STUDENT_DOCUMENTS, label: 'My Docs', icon: '📂' },
     { href: ROUTES.STUDENT_ASK_AI, label: 'Ask AI', icon: '🤖' },
     { href: ROUTES.STUDENT_PRACTICE, label: 'Practice', icon: '✏️' },
-    { href: ROUTES.STUDENT_ATTEMPTS, label: 'Attempts', icon: '📝' },
     { href: ROUTES.STUDENT_PROGRESS, label: 'Progress', icon: '📊' },
     { href: ROUTES.STUDENT_PROFILE, label: 'Profile', icon: '👤' },
   ];

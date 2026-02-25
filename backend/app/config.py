@@ -38,9 +38,23 @@ class Settings(BaseSettings):
     # ── Celery / Redis ──────────────────────────────────────────────────
     CELERY_BROKER_URL: str = "redis://localhost:6379/0"
     CELERY_RESULT_BACKEND: str = "redis://localhost:6379/0"
+    REDIS_URL: str = ""  # defaults to CELERY_BROKER_URL at runtime
     # In non-production, run tasks synchronously in-process (no Redis needed).
     # Set CELERY_TASK_ALWAYS_EAGER=false in .env to use a real broker.
     CELERY_TASK_ALWAYS_EAGER: bool = True
+
+    @property
+    def redis_url(self) -> str:
+        """Return REDIS_URL, falling back to CELERY_BROKER_URL."""
+        return self.REDIS_URL or self.CELERY_BROKER_URL
+
+    # ── RAG Cache ───────────────────────────────────────────────────────
+    RAG_CACHE_TTL_SECONDS: int = 3600  # 1 hour default
+    RAG_CACHE_ENABLED: bool = True
+
+    # ── Rate Limiting (leaky bucket) ────────────────────────────────────
+    RATE_LIMIT_RAG_RPM: int = 30       # max requests per minute to RAG/LLM
+    RATE_LIMIT_RAG_BURST: int = 5      # burst allowance
 
     # ── Adaptive‑learning knobs ─────────────────────────────────────────
     WEAK_TOPIC_THRESHOLD: float = 0.60

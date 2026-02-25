@@ -16,6 +16,9 @@ COPY pyproject.toml ./
 # Install Python dependencies
 RUN uv sync --no-dev --no-install-project
 
+# Ensure venv is on PATH so `python` resolves to the venv
+ENV PATH="/app/.venv/bin:$PATH"
+
 # Copy alembic config & migrations
 COPY alembic.ini ./
 COPY alembic/ alembic/

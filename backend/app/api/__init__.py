@@ -9,3 +9,5 @@ from app.api.progress import router as progress_router  # noqa: F401
 from app.api.rag import router as rag_router  # noqa: F401
 from app.api.chat import router as chat_router  # noqa: F401
 from app.api.admin import router as admin_router  # noqa: F401
+from app.api.subjects import router as subjects_router  # noqa: F401
+from app.api.practice import router as practice_router  # noqa: F401

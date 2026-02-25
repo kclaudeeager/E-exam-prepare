@@ -25,6 +25,8 @@ dependencies = [
     "redis>=5.2.0",
     # Utilities
     "python-dotenv>=1.0.0",
+    # PDF processing
+    "pypdf>=4.0.0",
 ]
 
 [dependency-groups]
