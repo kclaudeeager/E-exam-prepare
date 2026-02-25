@@ -12,6 +12,8 @@ from app.db.models import (
     Attempt,
     AttemptAnswer,
     Document,
+    PracticeSession,
+    PracticeStatusEnum,
     Progress,
     Question,
     Quiz,
@@ -68,15 +70,78 @@ def list_students(
 
     results: list[StudentSummary] = []
     for s in students:
-        # Aggregate from attempts table
-        agg = (
+        # Aggregate from attempts table (quizzes)
+        attempt_agg = (
             db.query(
                 func.count(Attempt.id).label("total_attempts"),
-                func.coalesce(func.avg(Attempt.percentage), 0).label("avg_pct"),
+                func.coalesce(func.sum(Attempt.score), 0).label("total_correct"),
+                func.coalesce(func.sum(Attempt.total), 0).label("total_questions"),
                 func.max(Attempt.submitted_at).label("last_at"),
             )
             .filter(Attempt.student_id == s.id, Attempt.submitted_at.isnot(None))
             .one()
+        )
+
+        # Aggregate from practice sessions (RAG practice)
+        practice_agg = (
+            db.query(
+                func.count(PracticeSession.id).label("total_sessions"),
+                func.coalesce(func.sum(PracticeSession.correct_count), 0).label("total_correct"),
+                func.coalesce(func.sum(PracticeSession.total_questions), 0).label("total_questions"),
+                func.max(PracticeSession.completed_at).label("last_at"),
+            )
+            .filter(
+                PracticeSession.student_id == s.id,
+                PracticeSession.status == PracticeStatusEnum.COMPLETED,
+            )
+            .one()
+        )
+
+        # Aggregate from Progress table for best overall accuracy signal
+        progress_agg = (
+            db.query(
+                func.coalesce(func.sum(Progress.total_correct), 0).label("total_correct"),
+                func.coalesce(func.sum(Progress.total_questions), 0).label("total_questions"),
+                func.max(Progress.last_attempted_at).label("last_at"),
+            )
+            .filter(Progress.student_id == s.id)
+            .one()
+        )
+
+        progress_total_questions = progress_agg.total_questions or 0
+        progress_total_correct = progress_agg.total_correct or 0
+        if progress_total_questions:
+            overall_accuracy = round(progress_total_correct / progress_total_questions, 4)
+        else:
+            combined_total_correct = (attempt_agg.total_correct or 0) + (
+                practice_agg.total_correct or 0
+            )
+            combined_total_questions = (attempt_agg.total_questions or 0) + (
+                practice_agg.total_questions or 0
+            )
+            overall_accuracy = (
+                round(combined_total_correct / combined_total_questions, 4)
+                if combined_total_questions
+                else 0.0
+            )
+
+        total_attempts = (
+            db.query(func.coalesce(func.sum(Progress.attempt_count), 0))
+            .filter(Progress.student_id == s.id)
+            .scalar()
+        ) or 0
+
+        last_attempt_at = max(
+            [
+                dt
+                for dt in [
+                    progress_agg.last_at,
+                    attempt_agg.last_at,
+                    practice_agg.last_at,
+                ]
+                if dt is not None
+            ],
+            default=None,
         )
 
         results.append(
@@ -86,9 +151,9 @@ def list_students(
                 full_name=s.full_name,
                 is_active=s.is_active,
                 created_at=s.created_at,
-                total_attempts=agg.total_attempts or 0,
-                overall_accuracy=round((agg.avg_pct or 0) / 100, 4),
-                last_attempt_at=agg.last_at,
+                total_attempts=total_attempts,
+                overall_accuracy=overall_accuracy,
+                last_attempt_at=last_attempt_at,
             )
         )
     return results
@@ -114,14 +179,30 @@ def get_student_detail(
     if not student:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Student not found")
 
-    # Aggregate
-    agg = (
+    # Aggregate attempts (quizzes)
+    attempt_agg = (
         db.query(
             func.count(Attempt.id).label("total_attempts"),
-            func.coalesce(func.avg(Attempt.percentage), 0).label("avg_pct"),
+            func.coalesce(func.sum(Attempt.score), 0).label("total_correct"),
+            func.coalesce(func.sum(Attempt.total), 0).label("total_questions"),
             func.max(Attempt.submitted_at).label("last_at"),
         )
         .filter(Attempt.student_id == student.id, Attempt.submitted_at.isnot(None))
+        .one()
+    )
+
+    # Aggregate practice sessions
+    practice_agg = (
+        db.query(
+            func.count(PracticeSession.id).label("total_sessions"),
+            func.coalesce(func.sum(PracticeSession.correct_count), 0).label("total_correct"),
+            func.coalesce(func.sum(PracticeSession.total_questions), 0).label("total_questions"),
+            func.max(PracticeSession.completed_at).label("last_at"),
+        )
+        .filter(
+            PracticeSession.student_id == student.id,
+            PracticeSession.status == PracticeStatusEnum.COMPLETED,
+        )
         .one()
     )
 
@@ -144,14 +225,26 @@ def get_student_detail(
         if r.accuracy < settings.WEAK_TOPIC_THRESHOLD:
             weak_topics.append(topic_name)
 
-    # Recent attempts
-    recent = (
+    # Recent attempts (quizzes + practice sessions)
+    recent_quiz_rows = (
         db.query(Attempt)
         .filter(Attempt.student_id == student.id, Attempt.submitted_at.isnot(None))
         .order_by(Attempt.submitted_at.desc())
         .limit(20)
         .all()
     )
+    recent_practice_rows = (
+        db.query(PracticeSession, Document.filename)
+        .outerjoin(Document, PracticeSession.document_id == Document.id)
+        .filter(
+            PracticeSession.student_id == student.id,
+            PracticeSession.status == PracticeStatusEnum.COMPLETED,
+        )
+        .order_by(PracticeSession.completed_at.desc())
+        .limit(20)
+        .all()
+    )
+
     recent_attempts = [
         StudentAttemptSummary(
             id=a.id,
@@ -161,8 +254,62 @@ def get_student_detail(
             started_at=a.started_at,
             submitted_at=a.submitted_at,
         )
-        for a in recent
+        for a in recent_quiz_rows
     ]
+    recent_attempts.extend(
+        [
+            StudentAttemptSummary(
+                id=s.id,
+                score=s.correct_count,
+                total=s.total_questions,
+                percentage=(
+                    round((s.correct_count / s.total_questions) * 100, 2)
+                    if s.total_questions
+                    else 0.0
+                ),
+                document_name=doc_name,
+                started_at=s.created_at,
+                submitted_at=s.completed_at,
+            )
+            for s, doc_name in recent_practice_rows
+        ]
+    )
+    recent_attempts.sort(
+        key=lambda x: x.submitted_at or x.started_at, reverse=True
+    )
+    recent_attempts = recent_attempts[:20]
+
+    # Overall accuracy from Progress totals (fallback to attempts + practice)
+    total_correct = sum(r.total_correct for r in progress_rows)
+    total_questions = sum(r.total_questions for r in progress_rows)
+    if total_questions:
+        overall_accuracy = round(total_correct / total_questions, 4)
+    else:
+        combined_total_correct = (attempt_agg.total_correct or 0) + (
+            practice_agg.total_correct or 0
+        )
+        combined_total_questions = (attempt_agg.total_questions or 0) + (
+            practice_agg.total_questions or 0
+        )
+        overall_accuracy = (
+            round(combined_total_correct / combined_total_questions, 4)
+            if combined_total_questions
+            else 0.0
+        )
+
+    total_attempts = sum(r.attempt_count for r in progress_rows)
+    last_attempt_at = max(
+        [
+            dt
+            for dt in [
+                max((r.last_attempted_at for r in progress_rows), default=None),
+                attempt_agg.last_at,
+                practice_agg.last_at,
+            ]
+            if dt is not None
+        ],
+        default=None,
+    )
 
     return StudentDetail(
         id=student.id,
@@ -170,9 +317,9 @@ def get_student_detail(
         full_name=student.full_name,
         is_active=student.is_active,
         created_at=student.created_at,
-        total_attempts=agg.total_attempts or 0,
-        overall_accuracy=round((agg.avg_pct or 0) / 100, 4),
-        last_attempt_at=agg.last_at,
+        total_attempts=total_attempts,
+        overall_accuracy=overall_accuracy,
+        last_attempt_at=last_attempt_at,
         topic_metrics=topic_metrics,
         weak_topics=weak_topics,
         recent_attempts=recent_attempts,
@@ -198,25 +345,74 @@ def get_analytics(
     total_documents = db.query(func.count(Document.id)).filter(Document.is_archived.is_(False)).scalar() or 0
     total_questions = db.query(func.count(Question.id)).scalar() or 0
     total_quizzes = db.query(func.count(Quiz.id)).scalar() or 0
-    total_attempts = db.query(func.count(Attempt.id)).filter(Attempt.submitted_at.isnot(None)).scalar() or 0
-    avg_accuracy_raw = (
-        db.query(func.avg(Attempt.percentage))
+    attempt_totals = (
+        db.query(
+            func.count(Attempt.id).label("total_attempts"),
+            func.coalesce(func.sum(Attempt.score), 0).label("total_correct"),
+            func.coalesce(func.sum(Attempt.total), 0).label("total_questions"),
+        )
         .filter(Attempt.submitted_at.isnot(None))
-        .scalar()
-    ) or 0
-    avg_accuracy = round(avg_accuracy_raw / 100, 4)
+        .one()
+    )
+    practice_totals = (
+        db.query(
+            func.count(PracticeSession.id).label("total_sessions"),
+            func.coalesce(func.sum(PracticeSession.correct_count), 0).label("total_correct"),
+            func.coalesce(func.sum(PracticeSession.total_questions), 0).label("total_questions"),
+        )
+        .filter(PracticeSession.status == PracticeStatusEnum.COMPLETED)
+        .one()
+    )
+    total_attempts = (attempt_totals.total_attempts or 0) + (
+        practice_totals.total_sessions or 0
+    )
+
+    combined_total_correct = (attempt_totals.total_correct or 0) + (
+        practice_totals.total_correct or 0
+    )
+    combined_total_questions = (attempt_totals.total_questions or 0) + (
+        practice_totals.total_questions or 0
+    )
+    avg_accuracy = (
+        round(combined_total_correct / combined_total_questions, 4)
+        if combined_total_questions
+        else 0.0
+    )
 
     # Active students: distinct students with attempts in last 7/30 days
-    active_7d = (
-        db.query(func.count(distinct(Attempt.student_id)))
+    active_attempt_7d = (
+        db.query(distinct(Attempt.student_id))
         .filter(Attempt.submitted_at >= now - timedelta(days=7))
-        .scalar()
-    ) or 0
-    active_30d = (
-        db.query(func.count(distinct(Attempt.student_id)))
+        .all()
+    )
+    active_practice_7d = (
+        db.query(distinct(PracticeSession.student_id))
+        .filter(PracticeSession.completed_at >= now - timedelta(days=7))
+        .all()
+    )
+    active_7d = len(
+        {
+            *[row[0] for row in active_attempt_7d],
+            *[row[0] for row in active_practice_7d],
+        }
+    )
+
+    active_attempt_30d = (
+        db.query(distinct(Attempt.student_id))
         .filter(Attempt.submitted_at >= now - timedelta(days=30))
-        .scalar()
-    ) or 0
+        .all()
+    )
+    active_practice_30d = (
+        db.query(distinct(PracticeSession.student_id))
+        .filter(PracticeSession.completed_at >= now - timedelta(days=30))
+        .all()
+    )
+    active_30d = len(
+        {
+            *[row[0] for row in active_attempt_30d],
+            *[row[0] for row in active_practice_30d],
+        }
+    )
 
     overview = SystemOverview(
         total_students=total_students,
@@ -258,31 +454,112 @@ def get_analytics(
 
     # ── daily trends ──────────────────────────────────────────────────────
     # Group attempts by date within the window
-    date_trunc = func.date(Attempt.submitted_at)
-    trend_rows = (
+    attempt_date = func.date(Attempt.submitted_at)
+    attempt_trend_rows = (
         db.query(
-            date_trunc.label("day"),
+            attempt_date.label("day"),
             func.count(Attempt.id).label("attempts"),
-            func.coalesce(func.avg(Attempt.percentage), 0).label("avg_pct"),
+            func.coalesce(func.sum(Attempt.score), 0).label("correct"),
+            func.coalesce(func.sum(Attempt.total), 0).label("total"),
             func.count(distinct(Attempt.student_id)).label("active_students"),
         )
         .filter(
             Attempt.submitted_at.isnot(None),
             Attempt.submitted_at >= window_start,
         )
-        .group_by(date_trunc)
-        .order_by(date_trunc)
+        .group_by(attempt_date)
+        .order_by(attempt_date)
         .all()
     )
-    trends = [
-        TrendPoint(
-            date=str(row.day),
-            attempts=row.attempts,
-            avg_accuracy=round(row.avg_pct / 100, 4),
-            active_students=row.active_students,
+
+    practice_date = func.date(PracticeSession.completed_at)
+    practice_trend_rows = (
+        db.query(
+            practice_date.label("day"),
+            func.count(PracticeSession.id).label("attempts"),
+            func.coalesce(func.sum(PracticeSession.correct_count), 0).label("correct"),
+            func.coalesce(func.sum(PracticeSession.total_questions), 0).label("total"),
+            func.count(distinct(PracticeSession.student_id)).label("active_students"),
         )
-        for row in trend_rows
-    ]
+        .filter(
+            PracticeSession.status == PracticeStatusEnum.COMPLETED,
+            PracticeSession.completed_at.isnot(None),
+            PracticeSession.completed_at >= window_start,
+        )
+        .group_by(practice_date)
+        .order_by(practice_date)
+        .all()
+    )
+
+    attempt_student_rows = (
+        db.query(attempt_date.label("day"), Attempt.student_id)
+        .filter(
+            Attempt.submitted_at.isnot(None),
+            Attempt.submitted_at >= window_start,
+        )
+        .distinct()
+        .all()
+    )
+    practice_student_rows = (
+        db.query(practice_date.label("day"), PracticeSession.student_id)
+        .filter(
+            PracticeSession.status == PracticeStatusEnum.COMPLETED,
+            PracticeSession.completed_at.isnot(None),
+            PracticeSession.completed_at >= window_start,
+        )
+        .distinct()
+        .all()
+    )
+
+    trend_map: dict[str, dict] = {}
+    for row in attempt_trend_rows:
+        key = str(row.day)
+        trend_map[key] = {
+            "attempts": row.attempts or 0,
+            "correct": row.correct or 0,
+            "total": row.total or 0,
+            "active_students": set(),
+        }
+    for row in practice_trend_rows:
+        key = str(row.day)
+        trend_map.setdefault(
+            key, {"attempts": 0, "correct": 0, "total": 0, "active_students": set()}
+        )
+        trend_map[key]["attempts"] += row.attempts or 0
+        trend_map[key]["correct"] += row.correct or 0
+        trend_map[key]["total"] += row.total or 0
+
+    for day, student_id in attempt_student_rows:
+        key = str(day)
+        trend_map.setdefault(
+            key, {"attempts": 0, "correct": 0, "total": 0, "active_students": set()}
+        )
+        trend_map[key]["active_students"].add(student_id)
+
+    for day, student_id in practice_student_rows:
+        key = str(day)
+        trend_map.setdefault(
+            key, {"attempts": 0, "correct": 0, "total": 0, "active_students": set()}
+        )
+        trend_map[key]["active_students"].add(student_id)
+
+    trends = []
+    for day in sorted(trend_map.keys()):
+        entry = trend_map[day]
+        total_questions = entry["total"]
+        avg_accuracy = (
+            round(entry["correct"] / total_questions, 4)
+            if total_questions
+            else 0.0
+        )
+        trends.append(
+            TrendPoint(
+                date=day,
+                attempts=entry["attempts"],
+                avg_accuracy=avg_accuracy,
+                active_students=len(entry["active_students"]),
+            )
+        )
 
     # ── topic stats ───────────────────────────────────────────────────────
     topic_rows = (
@@ -308,11 +585,22 @@ def get_analytics(
     ]
 
     # ── recent attempts feed ──────────────────────────────────────────────
-    recent_rows = (
+    recent_quiz_rows = (
         db.query(Attempt, User.full_name)
         .join(User, Attempt.student_id == User.id)
         .filter(Attempt.submitted_at.isnot(None))
         .order_by(Attempt.submitted_at.desc())
+        .limit(15)
+        .all()
+    )
+    recent_practice_rows = (
+        db.query(PracticeSession, User.full_name)
+        .join(User, PracticeSession.student_id == User.id)
+        .filter(
+            PracticeSession.status == PracticeStatusEnum.COMPLETED,
+            PracticeSession.completed_at.isnot(None),
+        )
+        .order_by(PracticeSession.completed_at.desc())
         .limit(15)
         .all()
     )
@@ -325,8 +613,30 @@ def get_analytics(
             percentage=a.percentage,
             submitted_at=a.submitted_at,
         )
-        for a, name in recent_rows
+        for a, name in recent_quiz_rows
     ]
+    recent_attempts.extend(
+        [
+            RecentAttempt(
+                id=s.id,
+                student_name=name,
+                score=s.correct_count,
+                total=s.total_questions,
+                percentage=(
+                    round((s.correct_count / s.total_questions) * 100, 2)
+                    if s.total_questions
+                    else 0.0
+                ),
+                submitted_at=s.completed_at,
+            )
+            for s, name in recent_practice_rows
+        ]
+    )
+    recent_attempts.sort(
+        key=lambda x: x.submitted_at or datetime.min.replace(tzinfo=timezone.utc),
+        reverse=True,
+    )
+    recent_attempts = recent_attempts[:15]
 
     return AnalyticsResponse(
         overview=overview,
@@ -384,10 +694,23 @@ def get_student_performance(
             round(total_correct / total_questions, 4) if total_questions else 0.0
         )
 
-    # Attempt count
+    # Attempt count (quizzes + practice sessions)
     attempt_count = (
-        db.query(Attempt).filter(Attempt.student_id == student_uuid).count()
+        db.query(func.count(Attempt.id))
+        .filter(Attempt.student_id == student_uuid)
+        .scalar()
+        or 0
     )
+    practice_count = (
+        db.query(func.count(PracticeSession.id))
+        .filter(
+            PracticeSession.student_id == student_uuid,
+            PracticeSession.status == PracticeStatusEnum.COMPLETED,
+        )
+        .scalar()
+        or 0
+    )
+    attempt_count += practice_count
 
     # Weak topics (accuracy < threshold)
     weak_topics_data = [
@@ -422,6 +745,17 @@ def get_student_performance(
         .limit(10)
         .all()
     )
+    recent_practice_rows = (
+        db.query(PracticeSession, Document.filename)
+        .outerjoin(Document, PracticeSession.document_id == Document.id)
+        .filter(
+            PracticeSession.student_id == student_uuid,
+            PracticeSession.status == PracticeStatusEnum.COMPLETED,
+        )
+        .order_by(PracticeSession.completed_at.desc())
+        .limit(10)
+        .all()
+    )
     recent_attempts = [
         StudentAttemptSummary(
             id=a.id,
@@ -434,6 +768,28 @@ def get_student_performance(
         )
         for a, doc_name in recent_attempts_rows
     ]
+    recent_attempts.extend(
+        [
+            StudentAttemptSummary(
+                id=s.id,
+                score=s.correct_count,
+                total=s.total_questions,
+                percentage=(
+                    round((s.correct_count / s.total_questions) * 100, 2)
+                    if s.total_questions
+                    else 0.0
+                ),
+                document_name=doc_name,
+                started_at=s.created_at,
+                submitted_at=s.completed_at,
+            )
+            for s, doc_name in recent_practice_rows
+        ]
+    )
+    recent_attempts.sort(
+        key=lambda x: x.submitted_at or x.started_at, reverse=True
+    )
+    recent_attempts = recent_attempts[:10]
 
     # Last attempted date
     last_attempt = (
@@ -442,7 +798,26 @@ def get_student_performance(
         .order_by(Attempt.submitted_at.desc())
         .first()
     )
-    last_attempted_at = last_attempt.submitted_at if last_attempt else None
+    last_practice = (
+        db.query(PracticeSession)
+        .filter(
+            PracticeSession.student_id == student_uuid,
+            PracticeSession.status == PracticeStatusEnum.COMPLETED,
+        )
+        .order_by(PracticeSession.completed_at.desc())
+        .first()
+    )
+    last_attempted_at = max(
+        [
+            dt
+            for dt in [
+                last_attempt.submitted_at if last_attempt else None,
+                last_practice.completed_at if last_practice else None,
+            ]
+            if dt is not None
+        ],
+        default=None,
+    )
 
     return StudentPerformanceTrend(
         student_id=student_uuid,

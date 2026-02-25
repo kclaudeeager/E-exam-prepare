@@ -306,7 +306,8 @@ vercel deploy --prod
 ### Docker Compose
 ```bash
 docker compose -f docker-compose.yml up -d
-# All services deployed: Postgres, Redis, Backend, RAG, Frontend
+# All services deployed: Postgres, Redis, Backend, RAG, Frontend, Nginx
+# Access the app at http://localhost (Nginx reverse proxy)
 ```
 
 ### Environment Variables
@@ -318,7 +319,8 @@ POSTGRES_DB=exam_prep
 SECRET_KEY=your-secret-key
 LLAMA_INDEX_PROVIDER=groq
 GROQ_API_KEY=gsk_...
-NEXT_PUBLIC_API_URL=http://localhost:8000
+# When using Nginx reverse proxy, set API base to /api (same origin)
+NEXT_PUBLIC_API_URL=/api
 
 # Optional
 OPENAI_API_KEY=sk-...    # For OpenAI embeddings (otherwise uses free local FastEmbed)
