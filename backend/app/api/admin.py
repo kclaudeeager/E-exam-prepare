@@ -102,6 +102,7 @@ def list_students(
             db.query(
                 func.coalesce(func.sum(Progress.total_correct), 0).label("total_correct"),
                 func.coalesce(func.sum(Progress.total_questions), 0).label("total_questions"),
+                func.coalesce(func.sum(Progress.attempt_count), 0).label("attempt_count"),
                 func.max(Progress.last_attempted_at).label("last_at"),
             )
             .filter(Progress.student_id == s.id)
@@ -125,11 +126,7 @@ def list_students(
                 else 0.0
             )
 
-        total_attempts = (
-            db.query(func.coalesce(func.sum(Progress.attempt_count), 0))
-            .filter(Progress.student_id == s.id)
-            .scalar()
-        ) or 0
+        total_attempts = progress_agg.attempt_count or 0
 
         last_attempt_at = max(
             [
