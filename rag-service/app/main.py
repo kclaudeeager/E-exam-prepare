@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.routes import ingest, retrieve, query, explore, ocr
+from app.routes import ingest, retrieve, query, explore, ocr, images, search
 
 logging.basicConfig(
     level=logging.DEBUG if settings.DEBUG else logging.INFO,
@@ -45,6 +45,8 @@ app.include_router(retrieve.router, prefix="/retrieve", tags=["Retrieval"])
 app.include_router(query.router, prefix="/query", tags=["RAG Query"])
 app.include_router(explore.router, prefix="/explore", tags=["Graph Explore"])
 app.include_router(ocr.router, prefix="/ocr", tags=["OCR"])
+app.include_router(images.router, prefix="/images", tags=["Images"])
+app.include_router(search.router, prefix="/search", tags=["Web Search"])
 
 
 @app.get("/health")

@@ -4,10 +4,21 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/hooks';
 import { authAPI } from '@/lib/api';
-import { ROUTES, EDUCATION_LEVELS } from '@/config/constants';
+import { AccountType, EducationLevel } from '@/lib/types';
+import {
+  ROUTES,
+  EDUCATION_LEVELS,
+  ACCOUNT_TYPES,
+  ACADEMIC_LEVELS,
+  PRACTICE_CATEGORIES,
+} from '@/config/constants';
 
 const LEVEL_LABELS: Record<string, string> = Object.fromEntries(
   EDUCATION_LEVELS.map(({ value, label }) => [value, label]),
+);
+
+const ACCOUNT_TYPE_LABELS: Record<string, string> = Object.fromEntries(
+  ACCOUNT_TYPES.map(({ value, label }) => [value, label]),
 );
 
 export default function StudentProfilePage() {
@@ -21,6 +32,7 @@ export default function StudentProfilePage() {
 
   // Editable fields
   const [fullName, setFullName] = useState('');
+  const [accountType, setAccountType] = useState<AccountType | ''>('');
   const [educationLevel, setEducationLevel] = useState('');
 
   useEffect(() => {
@@ -41,8 +53,14 @@ export default function StudentProfilePage() {
       return;
     }
     setFullName(user.full_name ?? '');
+    setAccountType(user.account_type ?? 'academic');
     setEducationLevel(user.education_level ?? '');
   }, [user, router]);
+
+  const handleAccountTypeChange = (type: AccountType) => {
+    setAccountType(type);
+    setEducationLevel(''); // reset level when switching purpose
+  };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -56,7 +74,8 @@ export default function StudentProfilePage() {
     try {
       await authAPI.updateProfile({
         full_name: fullName.trim(),
-        education_level: (educationLevel as 'P6' | 'S3' | 'S6' | 'TTC') || undefined,
+        account_type: (accountType || undefined) as AccountType | undefined,
+        education_level: (educationLevel || undefined) as EducationLevel | undefined,
       });
       // Refresh the global user state
       await fetchCurrentUser();
@@ -100,7 +119,7 @@ export default function StudentProfilePage() {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-3 border-t pt-3 text-sm">
+        <div className="grid grid-cols-3 gap-3 border-t pt-3 text-sm">
           <div>
             <p className="text-xs font-medium text-gray-500 uppercase">Role</p>
             <span className="inline-block mt-0.5 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-700 capitalize">
@@ -108,8 +127,14 @@ export default function StudentProfilePage() {
             </span>
           </div>
           <div>
+            <p className="text-xs font-medium text-gray-500 uppercase">Purpose</p>
+            <span className="inline-block mt-0.5 rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-semibold text-indigo-700 capitalize">
+              {ACCOUNT_TYPE_LABELS[user.account_type] ?? user.account_type ?? 'Academic'}
+            </span>
+          </div>
+          <div>
             <p className="text-xs font-medium text-gray-500 uppercase">
-              Education Level
+              Level / Category
             </p>
             {user.education_level ? (
               <span className="inline-block mt-0.5 rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700">
@@ -164,30 +189,89 @@ export default function StudentProfilePage() {
           />
         </div>
 
-        <div className="flex flex-col gap-1">
-          <label
-            htmlFor="educationLevel"
-            className="text-sm font-medium text-gray-700"
-          >
-            Education Level
+        {/* Purpose selector */}
+        <div className="flex flex-col gap-2">
+          <label className="text-sm font-medium text-gray-700">
+            What are you preparing for?
           </label>
-          <select
-            id="educationLevel"
-            value={educationLevel}
-            onChange={(e) => setEducationLevel(e.target.value)}
-            className="input"
-          >
-            <option value="">— Select your level —</option>
-            {EDUCATION_LEVELS.map(({ value, label }) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
+          <div className="grid grid-cols-2 gap-2">
+            {ACCOUNT_TYPES.map((t) => (
+              <button
+                key={t.value}
+                type="button"
+                onClick={() => handleAccountTypeChange(t.value as AccountType)}
+                disabled={saving}
+                className={`flex items-center gap-2 rounded-lg border-2 px-3 py-2 text-left text-sm transition-all ${
+                  accountType === t.value
+                    ? 'border-blue-500 bg-blue-50'
+                    : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                }`}
+              >
+                <span className="text-lg">{t.icon}</span>
+                <span className="font-medium text-gray-800">{t.label}</span>
+              </button>
             ))}
-          </select>
-          <p className="text-xs text-gray-400">
-            This determines which admin exam papers are shown to you.
-          </p>
+          </div>
         </div>
+
+        {/* Academic levels */}
+        {accountType === 'academic' && (
+          <div className="flex flex-col gap-1">
+            <label
+              htmlFor="educationLevel"
+              className="text-sm font-medium text-gray-700"
+            >
+              Education Level
+            </label>
+            <select
+              id="educationLevel"
+              value={educationLevel}
+              onChange={(e) => setEducationLevel(e.target.value)}
+              className="input"
+            >
+              <option value="">— Select your level —</option>
+              {ACADEMIC_LEVELS.map(({ value, label }) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-gray-400">
+              This determines which admin exam papers are shown to you.
+            </p>
+          </div>
+        )}
+
+        {/* Practice categories */}
+        {accountType === 'practice' && (
+          <div className="flex flex-col gap-2">
+            <label className="text-sm font-medium text-gray-700">
+              Practice Area
+            </label>
+            {PRACTICE_CATEGORIES.map((cat) => (
+              <button
+                key={cat.value}
+                type="button"
+                onClick={() => setEducationLevel(cat.value)}
+                disabled={saving}
+                className={`flex items-center gap-3 rounded-lg border-2 px-4 py-2.5 text-left transition-all ${
+                  educationLevel === cat.value
+                    ? 'border-blue-500 bg-blue-50'
+                    : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                }`}
+              >
+                <span className="text-xl">{cat.icon}</span>
+                <div>
+                  <span className="text-sm font-medium text-gray-800">{cat.label}</span>
+                  <p className="text-xs text-gray-500">{cat.description}</p>
+                </div>
+              </button>
+            ))}
+            <p className="text-xs text-gray-400">
+              More practice areas coming soon.
+            </p>
+          </div>
+        )}
 
         <div className="flex gap-3 pt-1">
           <button

@@ -25,6 +25,7 @@ COPY alembic/ alembic/
 
 # Copy application code
 COPY app/ app/
+COPY scripts/ scripts/
 COPY seed_db.py ./
 COPY start.sh ./
 

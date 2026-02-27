@@ -26,6 +26,7 @@ export default function Navbar() {
   const adminLinks = [
     { href: ROUTES.DASHBOARD, label: 'Dashboard', icon: '🏠' },
     { href: ROUTES.ADMIN_DOCUMENTS, label: 'Documents', icon: '📁' },
+    { href: ROUTES.ADMIN_SUBJECTS, label: 'Subjects', icon: '📚' },
     { href: ROUTES.ADMIN_STUDENTS, label: 'Students', icon: '👥' },
     { href: ROUTES.ADMIN_ANALYTICS, label: 'Analytics', icon: '📈' },
   ];

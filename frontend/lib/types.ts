@@ -4,10 +4,11 @@
  */
 
 export type Role = 'student' | 'admin';
-export type EducationLevel = 'P6' | 'S3' | 'S6' | 'TTC';
+export type AccountType = 'academic' | 'practice';
+export type EducationLevel = 'P6' | 'S3' | 'S6' | 'TTC' | 'DRIVING';
 export type QuizMode = 'adaptive' | 'topic-focused' | 'real-exam';
 export type IngestionStatus = 'pending' | 'ingesting' | 'completed' | 'failed';
-export type DocumentCategory = 'exam_paper' | 'marking_scheme' | 'syllabus' | 'textbook' | 'notes' | 'other';
+export type DocumentCategory = 'exam_paper' | 'marking_scheme' | 'syllabus' | 'textbook' | 'notes' | 'driving_manual' | 'other';
 export type PracticeStatus = 'in_progress' | 'completed' | 'abandoned';
 
 // ── User & Auth ────────────────────────────────────────────────────────────
@@ -16,6 +17,7 @@ export interface UserCreate {
   email: string;
   password: string;
   full_name: string;
+  account_type?: AccountType;
   education_level?: EducationLevel;
 }
 
@@ -29,6 +31,7 @@ export interface UserRead {
   email: string;
   full_name: string;
   role: Role;
+  account_type: AccountType;
   education_level?: EducationLevel;
   is_active: boolean;
   subscribed_topics: string[];
@@ -37,6 +40,7 @@ export interface UserRead {
 
 export interface UserUpdate {
   full_name?: string;
+  account_type?: AccountType;
   education_level?: EducationLevel;
 }
 
@@ -82,6 +86,7 @@ export interface DocumentRead {
   document_category?: DocumentCategory;
   page_count?: number;
   subject_id?: string;
+  collection_name?: string;
 }
 
 export type CommentType = 'comment' | 'highlight' | 'issue';

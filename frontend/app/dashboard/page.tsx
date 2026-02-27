@@ -137,7 +137,7 @@ export default function DashboardPage() {
           <div className="space-y-6">
             <h2 className="text-xl font-bold text-gray-900">Admin Dashboard</h2>
 
-            <div className="grid gap-4 md:grid-cols-3">
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
               <Link href={ROUTES.ADMIN_DOCUMENTS}>
                 <div className="card cursor-pointer hover:shadow-md">
                   <div className="flex items-center justify-between">
@@ -146,6 +146,18 @@ export default function DashboardPage() {
                       <p className="text-sm text-gray-600">Upload and manage exams</p>
                     </div>
                     <div className="text-3xl">📄</div>
+                  </div>
+                </div>
+              </Link>
+
+              <Link href={ROUTES.ADMIN_SUBJECTS}>
+                <div className="card cursor-pointer hover:shadow-md border-blue-100">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="font-semibold text-gray-900">Subjects</h3>
+                      <p className="text-sm text-gray-600">Manage subjects &amp; levels</p>
+                    </div>
+                    <div className="text-3xl">📚</div>
                   </div>
                 </div>
               </Link>

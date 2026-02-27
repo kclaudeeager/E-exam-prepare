@@ -3,8 +3,8 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/lib/hooks';
-import { UserCreate } from '@/lib/types';
-import { ROUTES, EDUCATION_LEVELS } from '@/config/constants';
+import { UserCreate, AccountType, EducationLevel } from '@/lib/types';
+import { ROUTES, ACCOUNT_TYPES, ACADEMIC_LEVELS, PRACTICE_CATEGORIES } from '@/config/constants';
 
 export default function RegisterPage() {
   const { register, isLoading } = useAuth();
@@ -12,6 +12,7 @@ export default function RegisterPage() {
     email: '',
     password: '',
     full_name: '',
+    account_type: undefined,
     education_level: undefined,
   });
   const [error, setError] = useState<string>('');
@@ -19,6 +20,19 @@ export default function RegisterPage() {
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value || undefined }));
+  };
+
+  const handleAccountType = (type: AccountType) => {
+    setFormData((prev) => ({
+      ...prev,
+      account_type: type,
+      // Reset education_level when switching purpose
+      education_level: undefined,
+    }));
+  };
+
+  const handlePracticeCategory = (level: EducationLevel) => {
+    setFormData((prev) => ({ ...prev, education_level: level }));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -93,24 +107,86 @@ export default function RegisterPage() {
             />
           </div>
 
+          {/* Purpose selector — Academic vs Practice */}
           <div>
-            <label htmlFor="education_level" className="block text-sm font-medium text-gray-700">
-              Education Level
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              What are you preparing for?
             </label>
-            <select
-              id="education_level"
-              name="education_level"
-              value={formData.education_level || ''}
-              onChange={handleChange}
-              disabled={isLoading}
-              className="mt-1 w-full"
-            >
-              <option value="">Select your level (optional)</option>
-              {EDUCATION_LEVELS.map((l) => (
-                <option key={l.value} value={l.value}>{l.label}</option>
+            <div className="grid grid-cols-2 gap-3">
+              {ACCOUNT_TYPES.map((t) => (
+                <button
+                  key={t.value}
+                  type="button"
+                  onClick={() => handleAccountType(t.value as AccountType)}
+                  disabled={isLoading}
+                  className={`flex flex-col items-center gap-1 rounded-xl border-2 p-3 text-center transition-all ${
+                    formData.account_type === t.value
+                      ? 'border-blue-500 bg-blue-50 shadow-sm'
+                      : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                  }`}
+                >
+                  <span className="text-2xl">{t.icon}</span>
+                  <span className="text-sm font-semibold text-gray-800">{t.label}</span>
+                  <span className="text-xs text-gray-500 leading-tight">{t.description}</span>
+                </button>
               ))}
-            </select>
+            </div>
           </div>
+
+          {/* Academic: show education levels */}
+          {formData.account_type === 'academic' && (
+            <div>
+              <label htmlFor="education_level" className="block text-sm font-medium text-gray-700">
+                Education Level
+              </label>
+              <select
+                id="education_level"
+                name="education_level"
+                value={formData.education_level || ''}
+                onChange={handleChange}
+                disabled={isLoading}
+                className="mt-1 w-full"
+              >
+                <option value="">Select your level (optional)</option>
+                {ACADEMIC_LEVELS.map((l) => (
+                  <option key={l.value} value={l.value}>{l.label}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Practice: show practice categories */}
+          {formData.account_type === 'practice' && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Choose your practice area
+              </label>
+              <div className="space-y-2">
+                {PRACTICE_CATEGORIES.map((cat) => (
+                  <button
+                    key={cat.value}
+                    type="button"
+                    onClick={() => handlePracticeCategory(cat.value as EducationLevel)}
+                    disabled={isLoading}
+                    className={`flex w-full items-center gap-3 rounded-lg border-2 px-4 py-3 text-left transition-all ${
+                      formData.education_level === cat.value
+                        ? 'border-blue-500 bg-blue-50 shadow-sm'
+                        : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                    }`}
+                  >
+                    <span className="text-2xl">{cat.icon}</span>
+                    <div>
+                      <span className="text-sm font-semibold text-gray-800">{cat.label}</span>
+                      <p className="text-xs text-gray-500">{cat.description}</p>
+                    </div>
+                  </button>
+                ))}
+                <p className="text-xs text-gray-400 mt-1">
+                  More practice areas coming soon — nursing, security guard, etc.
+                </p>
+              </div>
+            </div>
+          )}
 
           {error && (
             <div className="rounded bg-red-50 p-3 text-sm text-red-700">

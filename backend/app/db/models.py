@@ -54,11 +54,17 @@ class RoleEnum(str, enum.Enum):
     ADMIN = "admin"
 
 
+class AccountTypeEnum(str, enum.Enum):
+    ACADEMIC = "academic"
+    PRACTICE = "practice"
+
+
 class EducationLevelEnum(str, enum.Enum):
     P6 = "P6"
     S3 = "S3"
     S6 = "S6"
     TTC = "TTC"
+    DRIVING = "DRIVING"
 
 
 class IngestionStatusEnum(str, enum.Enum):
@@ -86,6 +92,7 @@ class DocumentCategoryEnum(str, enum.Enum):
     SYLLABUS = "syllabus"
     TEXTBOOK = "textbook"
     NOTES = "notes"
+    DRIVING_MANUAL = "driving_manual"
     OTHER = "other"
 
 
@@ -109,6 +116,15 @@ class User(Base):
     full_name: Mapped[str] = mapped_column(String(255))
     role: Mapped[RoleEnum] = mapped_column(
         Enum(RoleEnum, name="role_enum"), default=RoleEnum.STUDENT
+    )
+    account_type: Mapped[AccountTypeEnum] = mapped_column(
+        Enum(
+            AccountTypeEnum,
+            name="account_type_enum",
+            create_constraint=False,
+            values_callable=lambda x: [e.value for e in x],
+        ),
+        default=AccountTypeEnum.ACADEMIC,
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     education_level: Mapped[EducationLevelEnum | None] = mapped_column(

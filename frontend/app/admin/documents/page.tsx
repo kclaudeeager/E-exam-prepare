@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { useAuth } from '@/lib/hooks';
+import { useAuth, useSubjects } from '@/lib/hooks';
 import { documentAPI } from '@/lib/api';
 import { DocumentRead } from '@/lib/types';
 import { EDUCATION_LEVELS, ROUTES, DOCUMENT_CATEGORIES } from '@/config/constants';
@@ -23,6 +23,15 @@ export default function DocumentsPage() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Filters for document list
+  const [filterLevel, setFilterLevel] = useState('');
+  const [filterStatus, setFilterStatus] = useState('');
+
+  // Upload form: subject suggestions based on selected level
+  const [selectedLevel, setSelectedLevel] = useState('');
+  const [customSubject, setCustomSubject] = useState(false);
+  const { subjects: levelSubjects } = useSubjects(selectedLevel || undefined);
 
   // Auth guard — must be a useEffect, never an early return before other hooks
   useEffect(() => {
@@ -82,6 +91,7 @@ export default function DocumentsPage() {
     const level = formData.get('level') as string;
     const year = formData.get('year') as string;
     const duration = formData.get('duration') as string;
+    const documentCategory = formData.get('document_category') as string;
 
     if (!file || !subject || !level || !year) {
       setError('Please fill in all required fields');
@@ -95,10 +105,13 @@ export default function DocumentsPage() {
         level,
         year,
         official_duration_minutes: duration ? parseInt(duration, 10) : undefined,
+        document_category: documentCategory || undefined,
       });
       setSuccess('Document uploaded and queued for ingestion!');
       (e.target as HTMLFormElement).reset();
       if (fileInputRef.current) fileInputRef.current.value = '';
+      setSelectedLevel('');
+      setCustomSubject(false);
       loadDocuments(showArchived);
     } catch (err: any) {
       setError(err?.response?.data?.detail || 'Upload failed');
@@ -137,7 +150,12 @@ export default function DocumentsPage() {
 
   const active = documents.filter((d) => !d.is_archived);
   const archived = documents.filter((d) => d.is_archived);
-  const displayed = showArchived ? archived : active;
+  const baseList = showArchived ? archived : active;
+  const displayed = baseList.filter((d) => {
+    if (filterLevel && d.level !== filterLevel) return false;
+    if (filterStatus && d.ingestion_status !== filterStatus) return false;
+    return true;
+  });
 
   return (
     <>
@@ -156,17 +174,73 @@ export default function DocumentsPage() {
                 </div>
 
                 <div>
-                  <label htmlFor="subject" className="block text-sm font-medium text-gray-700">Subject</label>
-                  <input type="text" id="subject" name="subject" placeholder="e.g., Mathematics"
-                    required disabled={uploading} className="mt-1 w-full" />
-                </div>
-
-                <div>
                   <label htmlFor="level" className="block text-sm font-medium text-gray-700">Level</label>
-                  <select id="level" name="level" required disabled={uploading} className="mt-1 w-full">
+                  <select
+                    id="level"
+                    name="level"
+                    required
+                    disabled={uploading}
+                    className="mt-1 w-full"
+                    value={selectedLevel}
+                    onChange={(e) => { setSelectedLevel(e.target.value); setCustomSubject(false); }}
+                  >
                     <option value="">Select level</option>
                     {EDUCATION_LEVELS.map((l) => (
                       <option key={l.value} value={l.value}>{l.label}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label htmlFor="subject" className="block text-sm font-medium text-gray-700">Subject</label>
+                  {selectedLevel && levelSubjects.length > 0 && !customSubject ? (
+                    <select
+                      id="subject-select"
+                      name="subject"
+                      required
+                      disabled={uploading}
+                      className="mt-1 w-full"
+                      onChange={(e) => {
+                        if (e.target.value === '_custom') {
+                          setCustomSubject(true);
+                        }
+                      }}
+                    >
+                      <option value="">Select subject</option>
+                      {levelSubjects.map((s) => (
+                        <option key={s.id} value={s.name}>
+                          {s.icon || '📖'} {s.name}
+                        </option>
+                      ))}
+                      <option value="_custom">✏️ Custom (type below)</option>
+                    </select>
+                  ) : (
+                    <>
+                      <input type="text" id="subject" name="subject" placeholder="e.g., Mathematics"
+                        required disabled={uploading} className="mt-1 w-full" />
+                      {customSubject && (
+                        <button
+                          type="button"
+                          onClick={() => setCustomSubject(false)}
+                          className="mt-1 text-xs text-blue-600 hover:underline"
+                        >
+                          ← Back to subject list
+                        </button>
+                      )}
+                    </>
+                  )}
+                  {selectedLevel && levelSubjects.length === 0 && (
+                    <p className="mt-1 text-xs text-amber-600">
+                      No subjects found for {selectedLevel}. Type manually or seed defaults.
+                    </p>
+                  )}
+                </div>
+
+                <div>
+                  <label htmlFor="document_category" className="block text-sm font-medium text-gray-700">Category</label>
+                  <select id="document_category" name="document_category" disabled={uploading} className="mt-1 w-full">
+                    {DOCUMENT_CATEGORIES.map((c) => (
+                      <option key={c.value} value={c.value}>{c.icon} {c.label}</option>
                     ))}
                   </select>
                 </div>
@@ -202,7 +276,7 @@ export default function DocumentsPage() {
               <h2 className="font-semibold text-gray-900">
                 {showArchived ? 'Archived Documents' : 'Active Documents'}
                 <span className="ml-2 text-sm font-normal text-gray-500">
-                  ({(showArchived ? archived : active).length})
+                  ({displayed.length}{displayed.length !== baseList.length ? ` of ${baseList.length}` : ''})
                 </span>
               </h2>
               <button
@@ -215,6 +289,39 @@ export default function DocumentsPage() {
               >
                 {showArchived ? '← Back to Active' : `🗄 Show Archived (${archived.length})`}
               </button>
+            </div>
+
+            {/* ── Filters ── */}
+            <div className="mb-4 flex flex-wrap items-center gap-3">
+              <select
+                value={filterLevel}
+                onChange={(e) => setFilterLevel(e.target.value)}
+                className="rounded border border-gray-300 px-2 py-1.5 text-sm"
+              >
+                <option value="">All Levels</option>
+                {EDUCATION_LEVELS.map((l) => (
+                  <option key={l.value} value={l.value}>{l.label}</option>
+                ))}
+              </select>
+              <select
+                value={filterStatus}
+                onChange={(e) => setFilterStatus(e.target.value)}
+                className="rounded border border-gray-300 px-2 py-1.5 text-sm"
+              >
+                <option value="">All Statuses</option>
+                <option value="completed">✓ Ready</option>
+                <option value="pending">⏳ Pending</option>
+                <option value="ingesting">⚙ Ingesting</option>
+                <option value="failed">✗ Failed</option>
+              </select>
+              {(filterLevel || filterStatus) && (
+                <button
+                  onClick={() => { setFilterLevel(''); setFilterStatus(''); }}
+                  className="text-xs text-blue-600 hover:underline"
+                >
+                  Clear filters
+                </button>
+              )}
             </div>
 
             {isLoading ? (

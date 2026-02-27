@@ -75,15 +75,20 @@ _DEFAULT_SUBJECTS: dict[str, list[dict[str, str]]] = {
         {"name": "French", "icon": "🇫🇷"},
         {"name": "Special Needs Education", "icon": "♿"},
     ],
+    # Professional levels: only a single catch-all subject.
+    # Admin can create additional subjects as needed.
+    "DRIVING": [
+        {"name": "Driving Prep", "icon": "🚗"},
+    ],
 }
 
 
-@router.post("/seed-defaults", status_code=status.HTTP_201_CREATED)
-def seed_default_subjects(
-    _current_user: User = Depends(require_admin),
-    db: Session = Depends(get_db),
-):
-    """Seed default subjects for all education levels (admin only)."""
+def ensure_default_subjects(db: Session) -> int:
+    """Seed default subjects for all education levels.
+
+    Callable at startup (no auth) or via the admin endpoint.
+    Returns the number of new subjects created.
+    """
     created = 0
     for level_str, subjects in _DEFAULT_SUBJECTS.items():
         level = EducationLevelEnum(level_str)
@@ -102,7 +107,43 @@ def seed_default_subjects(
                     )
                 )
                 created += 1
-    db.commit()
+    if created:
+        db.commit()
+    return created
+
+
+def auto_enroll_user_in_level(db: Session, user_id: uuid.UUID, level: EducationLevelEnum) -> int:
+    """Enroll a user in ALL subjects for a given education level.
+
+    Used to auto-enroll practice users (e.g. DRIVING) on registration.
+    Returns the number of new enrollments.
+    """
+    subjects = db.query(Subject).filter(Subject.level == level).all()
+    enrolled = 0
+    for subj in subjects:
+        existing = (
+            db.query(StudentSubject)
+            .filter(
+                StudentSubject.student_id == user_id,
+                StudentSubject.subject_id == subj.id,
+            )
+            .first()
+        )
+        if not existing:
+            db.add(StudentSubject(student_id=user_id, subject_id=subj.id))
+            enrolled += 1
+    if enrolled:
+        db.commit()
+    return enrolled
+
+
+@router.post("/seed-defaults", status_code=status.HTTP_201_CREATED)
+def seed_default_subjects(
+    _current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Seed default subjects for all education levels (admin only)."""
+    created = ensure_default_subjects(db)
     return {"message": f"Seeded {created} new subjects", "created": created}
 
 

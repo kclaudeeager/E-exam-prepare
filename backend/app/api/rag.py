@@ -11,7 +11,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, require_admin
 from app.db.models import User
 from app.services.rag_client import get_rag_client
 from app.services.rate_limiter import require_rag_rate_limit
@@ -92,3 +92,92 @@ async def rag_retrieve(
         )
     except Exception as exc:
         raise _proxy_error(exc, "retrieve")
+
+
+# ── Web Search ────────────────────────────────────────────────────────────────
+
+
+class WebSearchRequest(BaseModel):
+    query: str
+    max_results: int = 5
+
+
+class WebImageSearchRequest(BaseModel):
+    query: str
+    max_results: int = 5
+
+
+@router.post("/search/web")
+async def web_search(
+    body: WebSearchRequest,
+    current_user: User = Depends(get_current_user),
+    _rl=Depends(require_rag_rate_limit),
+):
+    """Search the web for supplementary information (DuckDuckGo, free)."""
+    try:
+        return get_rag_client().web_search(
+            body.query, max_results=body.max_results
+        )
+    except Exception as exc:
+        raise _proxy_error(exc, "web_search")
+
+
+@router.post("/search/web/images")
+async def web_image_search(
+    body: WebImageSearchRequest,
+    current_user: User = Depends(get_current_user),
+    _rl=Depends(require_rag_rate_limit),
+):
+    """Search for images on the web (DuckDuckGo, free)."""
+    try:
+        return get_rag_client().web_image_search(
+            body.query, max_results=body.max_results
+        )
+    except Exception as exc:
+        raise _proxy_error(exc, "web_image_search")
+
+
+# ── Image Proxy ───────────────────────────────────────────────────────────────
+
+
+@router.get("/images/{collection}")
+async def list_collection_images(
+    collection: str,
+    current_user: User = Depends(get_current_user),
+):
+    """List all extracted images in a collection."""
+    try:
+        return get_rag_client().get_collection_images(collection)
+    except Exception as exc:
+        raise _proxy_error(exc, "list_images")
+
+
+# ── Seed Ingestion ────────────────────────────────────────────────────────────
+
+
+class SeedIngestRequest(BaseModel):
+    folder: str | None = None  # e.g. "driving"; None = all available
+    overwrite: bool = False
+
+
+@router.post("/seed/ingest")
+async def seed_ingest(
+    body: SeedIngestRequest,
+    _admin: User = Depends(require_admin),
+):
+    """Ingest curated documents from the RAG storage/raw/ folder (admin only)."""
+    try:
+        return get_rag_client().seed_ingest(body.folder, overwrite=body.overwrite)
+    except Exception as exc:
+        raise _proxy_error(exc, "seed_ingest")
+
+
+@router.get("/seed/available")
+async def list_seed_folders(
+    _admin: User = Depends(require_admin),
+):
+    """List available seed folders and their PDFs (admin only)."""
+    try:
+        return get_rag_client().list_seed_folders()
+    except Exception as exc:
+        raise _proxy_error(exc, "list_seed_folders")

@@ -31,6 +31,7 @@ export const ROUTES = {
   ADMIN_DOCUMENTS: '/admin/documents',
   ADMIN_DOCUMENT_DETAIL: (id: string) => `/admin/documents/${id}`,
   ADMIN_STUDENTS: '/admin/students',
+  ADMIN_SUBJECTS: '/admin/subjects',
   ADMIN_ANALYTICS: '/admin/analytics',
 };
 
@@ -64,6 +65,9 @@ export const API_ENDPOINTS = {
   // RAG
   RAG_QUERY: '/api/rag/query',
   RAG_RETRIEVE: '/api/rag/retrieve',
+  RAG_WEB_SEARCH: '/api/rag/search/web',
+  RAG_WEB_IMAGE_SEARCH: '/api/rag/search/web/images',
+  RAG_COLLECTION_IMAGES: (collection: string) => `/api/rag/images/${collection}`,
 
   // Chat
   CHAT_SESSIONS: '/api/chat/sessions',
@@ -108,11 +112,28 @@ export const API_ENDPOINTS = {
 
 // ── Constants ────────────────────────────────────────────────────────────
 
+export const ACCOUNT_TYPES = [
+  { value: 'academic', label: 'School / Academic Exams', icon: '🎓', description: 'Prepare for national exams (P6, S3, S6, TTC)' },
+  { value: 'practice', label: 'Professional / Practice Tests', icon: '💼', description: 'Prepare for certifications & license exams' },
+] as const;
+
+export const ACADEMIC_LEVELS = [
+  { value: 'P6', label: 'Primary 6 (P6)' },
+  { value: 'S3', label: 'Ordinary Level (S3)' },
+  { value: 'S6', label: 'Advanced Level (S6)' },
+  { value: 'TTC', label: 'Teacher Training (TTC)' },
+] as const;
+
+export const PRACTICE_CATEGORIES = [
+  { value: 'DRIVING', label: 'Driving Test Prep', icon: '🚗', description: 'Provisional license & road rules' },
+] as const;
+
 export const EDUCATION_LEVELS = [
   { value: 'P6', label: 'Primary 6 (P6)' },
   { value: 'S3', label: 'Ordinary Level (S3)' },
   { value: 'S6', label: 'Advanced Level (S6)' },
   { value: 'TTC', label: 'Teacher Training (TTC)' },
+  { value: 'DRIVING', label: 'Driving Test Prep' },
 ] as const;
 
 export const QUIZ_MODES = [
@@ -141,6 +162,7 @@ export const DOCUMENT_CATEGORIES = [
   { value: 'syllabus', label: 'Syllabus', icon: '📋' },
   { value: 'textbook', label: 'Textbook', icon: '📖' },
   { value: 'notes', label: 'Notes', icon: '📒' },
+  { value: 'driving_manual', label: 'Driving Manual', icon: '🚗' },
   { value: 'other', label: 'Other', icon: '📄' },
 ] as const;
 

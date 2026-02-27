@@ -325,7 +325,42 @@ class LlamaIndexRAGEngine:
             chunk_size=settings.CHUNK_SIZE, chunk_overlap=settings.CHUNK_OVERLAP
         )
         nodes = splitter.get_nodes_from_documents(documents)
-        logger.info("Created %d nodes (avg %.0f chars/page)", len(nodes), avg_chars)
+        logger.info("Created %d text nodes (avg %.0f chars/page)", len(nodes), avg_chars)
+
+        # ── Extract and index images from PDFs ────────────────────────────
+        image_docs: list[Any] = []
+        try:
+            from app.rag.image_extractor import extract_and_index_images
+
+            pdf_files: list[Path] = []
+            if src.is_file() and src.suffix.lower() == ".pdf":
+                pdf_files = [src]
+            elif src.is_dir():
+                pdf_files = list(src.rglob("*.pdf"))
+
+            for pdf_file in pdf_files:
+                try:
+                    img_nodes = extract_and_index_images(
+                        pdf_file, collection, self._storage,
+                        min_size_bytes=5000,
+                        caption_images=bool(settings.GROQ_API_KEY),
+                    )
+                    image_docs.extend(img_nodes)
+                except Exception as e:
+                    logger.warning(
+                        "Image extraction failed for '%s': %s", pdf_file.name, e
+                    )
+
+            if image_docs:
+                # Chunk image descriptions (they're usually short, so minimal splitting)
+                image_nodes = splitter.get_nodes_from_documents(image_docs)
+                nodes.extend(image_nodes)
+                logger.info(
+                    "Added %d image nodes from %d images across %d PDF(s)",
+                    len(image_nodes), len(image_docs), len(pdf_files),
+                )
+        except ImportError:
+            logger.debug("Image extractor not available — skipping image indexing")
 
         # Build VectorStoreIndex
         index = VectorStoreIndex(nodes, show_progress=True)
@@ -340,6 +375,7 @@ class LlamaIndexRAGEngine:
             "collection": collection,
             "documents_loaded": len(documents),
             "nodes_created": len(nodes),
+            "images_extracted": len(image_docs),
             "avg_chars_per_page": round(avg_chars),
             "time_seconds": elapsed,
         }
@@ -481,6 +517,109 @@ class LlamaIndexRAGEngine:
         )
         return expanded
 
+    # ── Source enrichment ─────────────────────────────────────────────────
+
+    def _build_sources(self, nodes: list[Any], collection: str) -> list[dict[str, Any]]:
+        """Build enriched source dicts from retrieved nodes.
+
+        For image nodes (content_type=image), includes image_url for frontend display.
+        """
+        sources = []
+        for i, node in enumerate(nodes):
+            meta = node.metadata or {}
+            source = {
+                "rank": i + 1,
+                "content": node.get_content()[:400],
+                "score": round(float(node.score or 0.0), 4),
+                "metadata": meta,
+            }
+
+            # Enrich image sources with serving URL
+            if meta.get("content_type") == "image":
+                img_filename = meta.get("image_filename", "")
+                img_collection = meta.get("image_collection", collection)
+                if img_filename:
+                    source["image_url"] = f"/images/{img_collection}/{img_filename}"
+                    source["image_caption"] = meta.get("image_caption", "")
+                    source["content_type"] = "image"
+
+            sources.append(source)
+        return sources
+
+    def _build_context_with_images(self, nodes: list[Any]) -> str:
+        """Build context string from retrieved nodes, with image markers.
+
+        Image nodes get a special marker so the LLM knows to reference them.
+        """
+        parts = []
+        for node in nodes:
+            meta = node.metadata or {}
+            if meta.get("content_type") == "image":
+                caption = meta.get("image_caption", "")
+                page = meta.get("page_number", "?")
+                parts.append(
+                    f"[IMAGE on page {page}]: {caption}\n"
+                    f"(This image can be displayed to the student)"
+                )
+            else:
+                parts.append(node.get_content())
+        return "\n\n---\n\n".join(parts)
+
+    # ── Web search augmentation ───────────────────────────────────────────
+
+    def _maybe_web_search(
+        self, question: str, nodes: list[Any], collection: str
+    ) -> tuple[str, list[dict[str, Any]]]:
+        """Optionally augment retrieval with web search results.
+
+        Returns (web_context_str, web_results_list).
+        Web search is triggered when:
+          1. WEB_SEARCH_ENABLED is True
+          2. Retrieval scores are below WEB_SEARCH_THRESHOLD, OR
+          3. No nodes were retrieved at all
+        """
+        if not settings.WEB_SEARCH_ENABLED:
+            return "", []
+
+        # Check if retrieval quality is sufficient
+        if nodes:
+            avg_score = sum(float(n.score or 0.0) for n in nodes) / len(nodes)
+            if avg_score >= settings.WEB_SEARCH_THRESHOLD:
+                logger.debug(
+                    "Retrieval avg score %.4f >= threshold %.4f — skipping web search",
+                    avg_score, settings.WEB_SEARCH_THRESHOLD,
+                )
+                return "", []
+
+        try:
+            from app.rag.web_search import get_web_searcher
+            searcher = get_web_searcher()
+
+            # Add collection context to search query
+            readable = collection.replace("_", " ")
+            search_query = f"{readable}: {question}"
+
+            formatted = searcher.search_and_format(
+                search_query,
+                max_results=settings.WEB_SEARCH_MAX_RESULTS,
+            )
+            raw_results = searcher.search(
+                search_query,
+                max_results=settings.WEB_SEARCH_MAX_RESULTS,
+            )
+
+            if formatted:
+                logger.info(
+                    "Web search augmented query [%s] with %d results",
+                    collection, len(raw_results),
+                )
+
+            return formatted, raw_results
+
+        except Exception as e:
+            logger.warning("Web search augmentation failed: %s", e)
+            return "", []
+
     # ── Query (full RAG) ──────────────────────────────────────────────────
 
     def query(
@@ -523,10 +662,15 @@ class LlamaIndexRAGEngine:
             else:
                 logger.warning("No nodes retrieved for [%s] query: '%s'", collection, search_question[:100])
 
-            # 3. Build context from retrieved nodes
-            context_str = "\n\n---\n\n".join(
-                node.get_content() for node in nodes
+            # 3. Build context from retrieved nodes (image-aware)
+            context_str = self._build_context_with_images(nodes)
+
+            # 3b. Augment with web search if retrieval quality is low
+            web_context, web_results = self._maybe_web_search(
+                search_question, nodes, collection
             )
+            if web_context:
+                context_str += f"\n\n--- Supplementary Web Search Results ---\n{web_context}"
 
             # 4. Format recent conversation history for the prompt
             recent = chat_history[-6:]  # Last 3 exchanges max
@@ -541,16 +685,40 @@ class LlamaIndexRAGEngine:
             readable_collection = collection.replace("_", " ")
             is_vague = self._is_vague_query(question)
 
+            # Image instruction for the LLM
+            image_instruction = ""
+            has_images = any(
+                (n.metadata or {}).get("content_type") == "image" for n in nodes
+            )
+            if has_images:
+                image_instruction = (
+                    "\nIMPORTANT: Some content below includes [IMAGE] markers with descriptions. "
+                    "When an image is relevant to your answer, mention it explicitly "
+                    "(e.g., 'As shown in the image on page X...' or "
+                    "'The road sign depicted on page X shows...'). "
+                    "The student will be able to see these images.\n"
+                )
+
+            # Web search instruction
+            web_instruction = ""
+            if web_results:
+                web_instruction = (
+                    "\nNote: Supplementary web search results are included. "
+                    "Prefer the exam content, but use web results for additional "
+                    "context or explanations when helpful.\n"
+                )
+
             if is_vague:
-                # Vague questions (like "what about this paper?") get an overview prompt
                 synthesis_prompt = (
                     "You are an expert exam tutor helping a student prepare for exams. "
                     f"The student is studying from the '{readable_collection}' exam paper collection.\n"
                     "The student is asking a general question about this exam paper.\n"
+                    f"{image_instruction}{web_instruction}"
                     "Based on the exam content below, provide a helpful overview:\n"
                     "- What subject/topic the exam covers\n"
                     "- The exam format (multiple choice, short answer, essay, etc.)\n"
                     "- Key topics and themes you can see in the questions\n"
+                    "- Any images, diagrams, or visual content found\n"
                     "- Any other useful details (year, duration, instructions)\n\n"
                     "--- Exam Content ---\n"
                     f"{context_str}\n"
@@ -562,14 +730,15 @@ class LlamaIndexRAGEngine:
                     "Tutor:"
                 )
             else:
-                # Specific questions get the strict prompt
                 synthesis_prompt = (
                     "You are an expert exam tutor helping a student prepare for exams. "
                     f"The student is studying from the '{readable_collection}' exam paper collection.\n"
-                    "Use ONLY the exam paper content below to answer.\n"
-                    "If the answer is not in the content, say: "
-                    "'I could not find that information in the provided exam papers.'\n"
-                    "Do not guess or use outside knowledge.\n\n"
+                    "Use the exam paper content below to answer. "
+                    "If supplementary web results are provided, use them to enhance "
+                    "your explanation, but always prioritize exam content.\n"
+                    "If the answer is not in the content or web results, say: "
+                    "'I could not find that information in the provided materials.'\n"
+                    f"{image_instruction}{web_instruction}\n"
                     "--- Exam Content ---\n"
                     f"{context_str}\n"
                     "--- End Exam Content ---\n\n"
@@ -583,15 +752,22 @@ class LlamaIndexRAGEngine:
             response = LISettings.llm.complete(synthesis_prompt)
             answer = str(response).strip()
 
-            sources = [
-                {
-                    "rank": i + 1,
-                    "content": node.get_content()[:400],
-                    "score": round(float(node.score or 0.0), 4),
-                    "metadata": node.metadata,
-                }
-                for i, node in enumerate(nodes)
-            ]
+            sources = self._build_sources(nodes, collection)
+
+            # Add web search results as additional sources
+            if web_results:
+                for wr in web_results:
+                    sources.append({
+                        "rank": len(sources) + 1,
+                        "content": wr.get("body", "")[:400],
+                        "score": 0.0,
+                        "metadata": {
+                            "source_type": "web_search",
+                            "title": wr.get("title", ""),
+                            "url": wr.get("href", ""),
+                        },
+                        "content_type": "web_result",
+                    })
 
             return {
                 "success": True,
@@ -599,6 +775,7 @@ class LlamaIndexRAGEngine:
                 "sources": sources,
                 "graph_enhanced": False,
                 "condensed_question": search_question,
+                "web_search_used": bool(web_results),
             }
 
         # ── Without chat history: manual retrieval + synthesis ──────────────
@@ -625,24 +802,55 @@ class LlamaIndexRAGEngine:
         else:
             logger.warning("No nodes retrieved for [%s] query: '%s'", collection, search_question[:100])
 
-        # Build context from retrieved nodes
-        context_str = "\n\n---\n\n".join(
-            node.get_content() for node in nodes
+        # Build context from retrieved nodes (image-aware)
+        context_str = self._build_context_with_images(nodes)
+
+        # Augment with web search if retrieval quality is low
+        web_context, web_results = self._maybe_web_search(
+            search_question, nodes, collection
         )
+        if web_context:
+            context_str += f"\n\n--- Supplementary Web Search Results ---\n{web_context}"
 
         # Synthesize — use different prompts for vague vs specific questions
         readable_collection = collection.replace("_", " ")
         is_vague = self._is_vague_query(question)
+
+        # Image instruction for the LLM
+        image_instruction = ""
+        has_images = any(
+            (n.metadata or {}).get("content_type") == "image" for n in nodes
+        )
+        if has_images:
+            image_instruction = (
+                "\nIMPORTANT: Some content below includes [IMAGE] markers with descriptions. "
+                "When an image is relevant to your answer, mention it explicitly "
+                "(e.g., 'As shown in the image on page X...' or "
+                "'The road sign depicted on page X shows...'). "
+                "The student will be able to see these images.\n"
+            )
+
+        # Web search instruction
+        web_instruction = ""
+        if web_results:
+            web_instruction = (
+                "\nNote: Supplementary web search results are included at the end. "
+                "Prefer the exam content for answers, but you may use web results "
+                "to provide additional context or explanations. Clearly indicate "
+                "when information comes from web sources vs exam content.\n"
+            )
 
         if is_vague:
             synthesis_prompt = (
                 "You are an expert exam tutor. "
                 f"The student is studying from the '{readable_collection}' exam paper collection.\n"
                 "The student is asking a general question about this exam paper.\n"
+                f"{image_instruction}{web_instruction}"
                 "Based on the exam content below, provide a helpful overview:\n"
                 "- What subject/topic the exam covers\n"
                 "- The exam format (multiple choice, short answer, essay, etc.)\n"
                 "- Key topics and themes you can see in the questions\n"
+                "- Any images, diagrams, or visual content found\n"
                 "- Any other useful details (year, duration, instructions)\n\n"
                 "--- Exam Content ---\n"
                 f"{context_str}\n"
@@ -654,10 +862,12 @@ class LlamaIndexRAGEngine:
             synthesis_prompt = (
                 "You are an expert exam tutor. "
                 f"The student is studying from the '{readable_collection}' exam paper collection.\n"
-                "Use ONLY the exam paper content below to answer.\n"
-                "If the answer is not present in the content, say exactly: "
-                "'I could not find that information in the provided exam papers.'\n"
-                "Do not guess or use outside knowledge.\n\n"
+                "Use the exam paper content below to answer. "
+                "If supplementary web search results are provided, you may use them "
+                "to enhance your explanation, but always prioritize exam content.\n"
+                "If the answer is not in the content or web results, say: "
+                "'I could not find that information in the provided materials.'\n"
+                f"{image_instruction}{web_instruction}\n"
                 "--- Exam Content ---\n"
                 f"{context_str}\n"
                 "--- End Exam Content ---\n\n"
@@ -668,21 +878,29 @@ class LlamaIndexRAGEngine:
         response = LISettings.llm.complete(synthesis_prompt)
         answer = str(response).strip()
 
-        sources = [
-            {
-                "rank": i + 1,
-                "content": node.get_content()[:400],
-                "score": round(float(node.score or 0.0), 4),
-                "metadata": node.metadata,
-            }
-            for i, node in enumerate(nodes)
-        ]
+        sources = self._build_sources(nodes, collection)
+
+        # Add web search results as additional sources
+        if web_results:
+            for i, wr in enumerate(web_results):
+                sources.append({
+                    "rank": len(sources) + 1,
+                    "content": wr.get("body", "")[:400],
+                    "score": 0.0,
+                    "metadata": {
+                        "source_type": "web_search",
+                        "title": wr.get("title", ""),
+                        "url": wr.get("href", ""),
+                    },
+                    "content_type": "web_result",
+                })
 
         result = {
             "success": True,
             "answer": answer,
             "sources": sources,
             "graph_enhanced": False,
+            "web_search_used": bool(web_results),
         }
         if search_question != question:
             result["expanded_question"] = search_question

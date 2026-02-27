@@ -67,9 +67,8 @@ export default function BrowseExamsPage() {
   };
 
   const handleAskAI = (doc: DocumentRead) => {
-    // Must match the collection name formula used in backend/app/tasks.py:
-    // collection = f"{doc.level}_{doc.subject}".replace(" ", "_")
-    const collection = `${doc.level}_${doc.subject}`.replace(/ /g, '_');
+    // Prefer the stored collection_name; fall back to derived pattern
+    const collection = doc.collection_name || `${doc.level}_${doc.subject}`.replace(/ /g, '_');
     const params = new URLSearchParams({
       subject: doc.subject,
       level: doc.level,
@@ -152,14 +151,30 @@ export default function BrowseExamsPage() {
           </div>
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {documents.map((doc) => (
+            {documents.map((doc) => {
+              // Clean up filename for display: strip extension, replace separators
+              const displayName = doc.filename
+                .replace(/\.pdf$/i, '')
+                .replace(/[_-]+/g, ' ')
+                .replace(/\s+/g, ' ')
+                .trim();
+              const hasDuplicateSubject =
+                documents.filter((d) => d.subject === doc.subject && d.level === doc.level).length > 1;
+
+              return (
               <div key={doc.id} className="card flex flex-col gap-3">
                 <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <h3 className="font-semibold text-gray-900">{doc.subject}</h3>
+                  <div className="min-w-0">
+                    <h3 className="font-semibold text-gray-900 truncate" title={displayName}>
+                      {hasDuplicateSubject ? displayName : doc.subject}
+                    </h3>
                     <p className="text-xs text-gray-500 mt-0.5">
+                      {hasDuplicateSubject && <span className="text-gray-600">{doc.subject} · </span>}
                       {LEVEL_LABELS[doc.level] ?? doc.level} · {doc.year}
                     </p>
+                    {doc.page_count && (
+                      <p className="text-xs text-gray-400 mt-0.5">📄 {doc.page_count} pages</p>
+                    )}
                   </div>
                   <span className="shrink-0 rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700">
                     {doc.level}
@@ -191,7 +206,8 @@ export default function BrowseExamsPage() {
                   </Link>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </main>

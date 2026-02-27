@@ -47,6 +47,15 @@ class Settings(BaseSettings):
     # ── LlamaParse (optional) ───────────────────────────────────────────
     LLAMA_CLOUD_API_KEY: str = ""
 
+    # ── Web Search ──────────────────────────────────────────────────────
+    WEB_SEARCH_ENABLED: bool = True          # Enable web search fallback
+    WEB_SEARCH_THRESHOLD: float = 0.3        # Min avg score to skip web search
+    WEB_SEARCH_MAX_RESULTS: int = 5          # Max web results to include
+
+    # ── Image Extraction ────────────────────────────────────────────────
+    IMAGE_EXTRACTION_ENABLED: bool = True    # Extract images from PDFs during ingest
+    IMAGE_MIN_SIZE_BYTES: int = 5000         # Skip images smaller than this
+
     model_config = {"env_file": str(_ENV_FILE), "case_sensitive": True, "extra": "ignore"}
 
 

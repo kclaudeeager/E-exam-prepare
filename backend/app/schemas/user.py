@@ -7,11 +7,17 @@ from enum import Enum
 from pydantic import BaseModel, EmailStr
 
 
+class AccountType(str, Enum):
+    ACADEMIC = "academic"
+    PRACTICE = "practice"
+
+
 class EducationLevel(str, Enum):
     P6 = "P6"
     S3 = "S3"
     S6 = "S6"
     TTC = "TTC"
+    DRIVING = "DRIVING"
 
 
 class UserCreate(BaseModel):
@@ -20,6 +26,7 @@ class UserCreate(BaseModel):
     email: EmailStr
     password: str
     full_name: str
+    account_type: AccountType = AccountType.ACADEMIC
     education_level: EducationLevel | None = None
     role: str = "student"
 
@@ -35,6 +42,7 @@ class UserUpdate(BaseModel):
     """PATCH /api/users/me — update own profile."""
 
     full_name: str | None = None
+    account_type: AccountType | None = None
     education_level: EducationLevel | None = None
 
 
@@ -45,6 +53,7 @@ class UserRead(BaseModel):
     email: str
     full_name: str
     role: str
+    account_type: AccountType = AccountType.ACADEMIC
     education_level: EducationLevel | None = None
     is_active: bool
     subscribed_topics: list[str] = []

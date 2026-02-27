@@ -165,8 +165,10 @@ export default function SubjectWorkspacePage() {
   }
 
   const levelLabel = EDUCATION_LEVELS.find((l) => l.value === subject.level)?.label ?? subject.level;
-  const examPapers = documents.filter((d) => !d.document_category || d.document_category === 'exam_paper');
-  const otherDocs = documents.filter((d) => d.document_category && d.document_category !== 'exam_paper');
+  // Categories that support practice (quiz generation from ingested content)
+  const PRACTICABLE_CATEGORIES = new Set(['exam_paper', 'driving_manual']);
+  const examPapers = documents.filter((d) => !d.document_category || PRACTICABLE_CATEGORIES.has(d.document_category));
+  const otherDocs = documents.filter((d) => d.document_category && !PRACTICABLE_CATEGORIES.has(d.document_category));
 
   return (
     <main className="container py-8">
@@ -313,10 +315,12 @@ export default function SubjectWorkspacePage() {
             </form>
           )}
 
-          {/* Exam Papers section */}
+          {/* Practice-eligible documents */}
           {examPapers.length > 0 && (
             <div>
-              <h3 className="text-sm font-semibold text-gray-700 mb-3">📝 Exam Papers</h3>
+              <h3 className="text-sm font-semibold text-gray-700 mb-3">
+                {examPapers.some(d => d.document_category === 'driving_manual') ? '🚗 Practice Materials' : '📝 Exam Papers'}
+              </h3>
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {examPapers.map((doc) => (
                   <DocumentCard

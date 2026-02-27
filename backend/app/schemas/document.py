@@ -12,6 +12,7 @@ class EducationLevel(str, Enum):
     S3 = "S3"
     S6 = "S6"
     TTC = "TTC"
+    DRIVING = "DRIVING"
 
 
 class DocumentCategory(str, Enum):
@@ -20,6 +21,7 @@ class DocumentCategory(str, Enum):
     SYLLABUS = "syllabus"
     TEXTBOOK = "textbook"
     NOTES = "notes"
+    DRIVING_MANUAL = "driving_manual"
     OTHER = "other"
 
 
@@ -63,6 +65,7 @@ class DocumentRead(BaseModel):
     official_duration_minutes: int | None = None
     page_count: int | None = None
     subject_id: uuid.UUID | None = None
+    collection_name: str | None = None
     is_archived: bool = False
     archived_at: datetime | None = None
     archived_by: uuid.UUID | None = None

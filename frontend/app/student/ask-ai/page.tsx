@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/lib/hooks';
 import { ragAPI, chatAPI, documentAPI, RAGQueryResponse } from '@/lib/api';
 import { DocumentRead, ChatSessionRead } from '@/lib/types';
-import { ROUTES } from '@/config/constants';
+import { ROUTES, RAG_URL } from '@/config/constants';
 import PDFViewerModal from '@/components/PDFViewerModal';
 
 interface Message {
@@ -14,6 +14,7 @@ interface Message {
   content: string;
   sources?: RAGQueryResponse['sources'];
   error?: boolean;
+  webSearchUsed?: boolean;
 }
 
 function AskAIContent() {
@@ -46,6 +47,12 @@ function AskAIContent() {
     totalPages?: number;
   } | null>(null);
 
+  // Image lightbox state
+  const [lightboxImage, setLightboxImage] = useState<{
+    url: string;
+    caption: string;
+  } | null>(null);
+
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -57,7 +64,7 @@ function AskAIContent() {
         new Set(
           docs
             .filter((d) => d.ingestion_status === 'completed')
-            .map((d) => `${d.level}_${d.subject}`.replace(/ /g, '_')),
+            .map((d) => d.collection_name || `${d.level}_${d.subject}`.replace(/ /g, '_')),
         ),
       ).sort();
       setAvailableCollections(cols);
@@ -222,6 +229,7 @@ function AskAIContent() {
         role: 'assistant',
         content: data.answer,
         sources: data.sources,
+        webSearchUsed: data.web_search_used,
       };
       setMessages((prev) => [...prev, aiMsg]);
 
@@ -425,84 +433,239 @@ function AskAIContent() {
         <div className="flex flex-1 flex-col rounded-xl border bg-white shadow-sm overflow-hidden">
           {/* Messages */}
           <div className="flex-1 overflow-y-auto p-4 space-y-4 min-h-[400px] max-h-[60vh]">
-            {messages.map((msg) => (
-              <div
-                key={msg.id}
-                className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-              >
+            {messages.map((msg) => {
+              // Separate image sources from text/web sources
+              const imageSources = msg.sources?.filter((s) => s.content_type === 'image') || [];
+              const webSources = msg.sources?.filter((s) => s.content_type === 'web_result') || [];
+              const docSources = msg.sources?.filter((s) => !s.content_type || (s.content_type !== 'image' && s.content_type !== 'web_result')) || [];
+              const totalSources = (msg.sources || []).length;
+
+              return (
                 <div
-                  className={`max-w-[80%] rounded-2xl px-4 py-3 text-sm ${
-                    msg.role === 'user'
-                      ? 'bg-blue-600 text-white rounded-br-sm'
-                      : msg.error
-                      ? 'bg-red-50 text-red-700 border border-red-200 rounded-bl-sm'
-                      : 'bg-gray-100 text-gray-900 rounded-bl-sm'
-                  }`}
+                  key={msg.id}
+                  className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
                 >
-                  <p className="whitespace-pre-wrap leading-relaxed">{msg.content}</p>
+                  <div
+                    className={`max-w-[80%] rounded-2xl px-4 py-3 text-sm ${
+                      msg.role === 'user'
+                        ? 'bg-blue-600 text-white rounded-br-sm'
+                        : msg.error
+                        ? 'bg-red-50 text-red-700 border border-red-200 rounded-bl-sm'
+                        : 'bg-gray-100 text-gray-900 rounded-bl-sm'
+                    }`}
+                  >
+                    {/* Web search badge */}
+                    {msg.webSearchUsed && msg.role === 'assistant' && !msg.error && (
+                      <div className="flex items-center gap-1.5 mb-2 pb-2 border-b border-gray-200">
+                        <span className="inline-flex items-center gap-1 rounded-full bg-purple-100 px-2.5 py-0.5 text-xs font-medium text-purple-700">
+                          🌐 Web search used
+                        </span>
+                      </div>
+                    )}
 
-                  {/* Sources toggle */}
-                  {msg.sources && msg.sources.length > 0 && (
-                    <div className="mt-2 pt-2 border-t border-gray-200">
-                      <button
-                        onClick={() =>
-                          setShowSources(showSources === msg.id ? null : msg.id)
-                        }
-                        className="text-xs text-blue-600 hover:underline font-medium"
-                      >
-                        {showSources === msg.id
-                          ? '▲ Hide sources'
-                          : `▼ View ${msg.sources.length} source${msg.sources.length > 1 ? 's' : ''}`}
-                      </button>
+                    <p className="whitespace-pre-wrap leading-relaxed">{msg.content}</p>
 
-                      {showSources === msg.id && (
-                        <div className="mt-2 space-y-2">
-                          {msg.sources.map((src) => {
-                            const fileName = src.metadata?.file_name as string | undefined;
-                            const pageNum = src.metadata?.page_number as number | undefined;
-                            const hasDoc = !!fileName && allDocuments.some((d) => d.filename === fileName);
-
-                            return (
-                              <div
-                                key={src.rank}
-                                className={`rounded-md bg-white border border-gray-200 p-2 text-xs text-gray-700 ${
-                                  hasDoc
-                                    ? 'cursor-pointer hover:border-blue-300 hover:bg-blue-50/50 transition-colors'
-                                    : ''
-                                }`}
-                                onClick={() => hasDoc && handleOpenSource(src)}
-                                role={hasDoc ? 'button' : undefined}
-                                tabIndex={hasDoc ? 0 : undefined}
-                                onKeyDown={(e) => {
-                                  if (hasDoc && (e.key === 'Enter' || e.key === ' ')) {
-                                    e.preventDefault();
-                                    handleOpenSource(src);
-                                  }
-                                }}
-                              >
-                                <div className="flex items-center gap-1 flex-wrap">
-                                  <p className="font-medium text-gray-500 mb-1">
-                                    Source #{src.rank} · score {src.score.toFixed(3)}
-                                    {fileName ? ` · ${fileName}` : ''}
-                                    {pageNum != null ? ` · p.${pageNum}` : ''}
-                                  </p>
-                                  {hasDoc && (
-                                    <span className="ml-auto text-blue-500 font-medium mb-1">
-                                      📄 Open →
-                                    </span>
-                                  )}
-                                </div>
-                                <p className="line-clamp-4">{src.content}</p>
+                    {/* Inline images from image sources */}
+                    {imageSources.length > 0 && (
+                      <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {imageSources.map((src, idx) => {
+                          const imgUrl = src.image_url
+                            ? `${RAG_URL}${src.image_url}`
+                            : undefined;
+                          const caption = src.image_caption || (src.metadata?.image_caption as string) || 'Extracted image';
+                          return imgUrl ? (
+                            <div
+                              key={`img-${idx}`}
+                              className="group relative rounded-lg overflow-hidden border border-gray-200 bg-white cursor-pointer hover:border-blue-400 hover:shadow-md transition-all"
+                              onClick={() => setLightboxImage({ url: imgUrl, caption })}
+                              role="button"
+                              tabIndex={0}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                  e.preventDefault();
+                                  setLightboxImage({ url: imgUrl, caption });
+                                }
+                              }}
+                            >
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img
+                                src={imgUrl}
+                                alt={caption}
+                                className="w-full h-auto max-h-48 object-contain bg-gray-50"
+                                loading="lazy"
+                              />
+                              <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center">
+                                <span className="opacity-0 group-hover:opacity-100 transition-opacity text-white bg-black/60 rounded-full px-2 py-1 text-xs">
+                                  🔍 Click to enlarge
+                                </span>
                               </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  )}
+                              <p className="px-2 py-1.5 text-xs text-gray-600 line-clamp-2">{caption}</p>
+                            </div>
+                          ) : null;
+                        })}
+                      </div>
+                    )}
+
+                    {/* Sources toggle */}
+                    {totalSources > 0 && (
+                      <div className="mt-2 pt-2 border-t border-gray-200">
+                        <button
+                          onClick={() =>
+                            setShowSources(showSources === msg.id ? null : msg.id)
+                          }
+                          className="text-xs text-blue-600 hover:underline font-medium"
+                        >
+                          {showSources === msg.id
+                            ? '▲ Hide sources'
+                            : `▼ View ${totalSources} source${totalSources > 1 ? 's' : ''}`}
+                        </button>
+
+                        {showSources === msg.id && (
+                          <div className="mt-2 space-y-3">
+                            {/* Document sources */}
+                            {docSources.length > 0 && (
+                              <div className="space-y-2">
+                                {docSources.length > 0 && (webSources.length > 0 || imageSources.length > 0) && (
+                                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">📄 Document Sources</p>
+                                )}
+                                {docSources.map((src) => {
+                                  const fileName = src.metadata?.file_name as string | undefined;
+                                  const pageNum = src.metadata?.page_number as number | undefined;
+                                  const hasDoc = !!fileName && allDocuments.some((d) => d.filename === fileName);
+
+                                  return (
+                                    <div
+                                      key={`doc-${src.rank}`}
+                                      className={`rounded-md bg-white border border-gray-200 p-2 text-xs text-gray-700 ${
+                                        hasDoc
+                                          ? 'cursor-pointer hover:border-blue-300 hover:bg-blue-50/50 transition-colors'
+                                          : ''
+                                      }`}
+                                      onClick={() => hasDoc && handleOpenSource(src)}
+                                      role={hasDoc ? 'button' : undefined}
+                                      tabIndex={hasDoc ? 0 : undefined}
+                                      onKeyDown={(e) => {
+                                        if (hasDoc && (e.key === 'Enter' || e.key === ' ')) {
+                                          e.preventDefault();
+                                          handleOpenSource(src);
+                                        }
+                                      }}
+                                    >
+                                      <div className="flex items-center gap-1 flex-wrap">
+                                        <p className="font-medium text-gray-500 mb-1">
+                                          Source #{src.rank} · score {src.score.toFixed(3)}
+                                          {fileName ? ` · ${fileName}` : ''}
+                                          {pageNum != null ? ` · p.${pageNum}` : ''}
+                                        </p>
+                                        {hasDoc && (
+                                          <span className="ml-auto text-blue-500 font-medium mb-1">
+                                            📄 Open →
+                                          </span>
+                                        )}
+                                      </div>
+                                      <p className="line-clamp-4">{src.content}</p>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+
+                            {/* Image sources (thumbnails in source list) */}
+                            {imageSources.length > 0 && (
+                              <div className="space-y-2">
+                                {(docSources.length > 0 || webSources.length > 0) && (
+                                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">🖼️ Image Sources</p>
+                                )}
+                                {imageSources.map((src, idx) => {
+                                  const imgUrl = src.image_url
+                                    ? `${RAG_URL}${src.image_url}`
+                                    : undefined;
+                                  const caption = src.image_caption || (src.metadata?.image_caption as string) || '';
+                                  const pageNum = src.metadata?.page_number as number | undefined;
+
+                                  return (
+                                    <div
+                                      key={`imgsrc-${idx}`}
+                                      className="rounded-md bg-white border border-gray-200 p-2 text-xs text-gray-700 flex gap-3 items-start"
+                                    >
+                                      {imgUrl && (
+                                        <div
+                                          className="shrink-0 cursor-pointer rounded overflow-hidden border border-gray-100 hover:border-blue-300 transition-colors"
+                                          onClick={() => setLightboxImage({ url: imgUrl, caption: caption || 'Image' })}
+                                          role="button"
+                                          tabIndex={0}
+                                          onKeyDown={(e) => {
+                                            if (e.key === 'Enter' || e.key === ' ') {
+                                              e.preventDefault();
+                                              setLightboxImage({ url: imgUrl, caption: caption || 'Image' });
+                                            }
+                                          }}
+                                        >
+                                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                                          <img
+                                            src={imgUrl}
+                                            alt={caption || 'Source image'}
+                                            className="w-16 h-16 object-contain bg-gray-50"
+                                            loading="lazy"
+                                          />
+                                        </div>
+                                      )}
+                                      <div className="flex-1 min-w-0">
+                                        <p className="font-medium text-gray-500 mb-1">
+                                          Image #{idx + 1} · score {src.score.toFixed(3)}
+                                          {pageNum != null ? ` · p.${pageNum}` : ''}
+                                        </p>
+                                        <p className="line-clamp-3">{caption || src.content}</p>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+
+                            {/* Web sources */}
+                            {webSources.length > 0 && (
+                              <div className="space-y-2">
+                                {(docSources.length > 0 || imageSources.length > 0) && (
+                                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">🌐 Web Sources</p>
+                                )}
+                                {webSources.map((src, idx) => {
+                                  const href = (src.metadata?.url as string) || (src.metadata?.href as string);
+                                  const title = (src.metadata?.title as string) || `Web result #${idx + 1}`;
+
+                                  return (
+                                    <div
+                                      key={`web-${idx}`}
+                                      className="rounded-md bg-purple-50 border border-purple-200 p-2 text-xs text-gray-700"
+                                    >
+                                      <div className="flex items-center gap-1 flex-wrap mb-1">
+                                        <span className="text-purple-600 font-medium">🌐 {title}</span>
+                                        {href && (
+                                          <a
+                                            href={href}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="ml-auto text-purple-500 hover:text-purple-700 font-medium"
+                                            onClick={(e) => e.stopPropagation()}
+                                          >
+                                            Open ↗
+                                          </a>
+                                        )}
+                                      </div>
+                                      <p className="line-clamp-3">{src.content}</p>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
 
             {loading && (
               <div className="flex justify-start">
@@ -543,6 +706,42 @@ function AskAIContent() {
         <p className="text-center text-xs text-gray-400">
           AI answers are generated from exam papers in the database. Always verify with your teacher.
         </p>
+
+        {/* Image Lightbox Modal */}
+        {lightboxImage && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm"
+            onClick={() => setLightboxImage(null)}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Image viewer"
+          >
+            <div
+              className="relative max-w-[90vw] max-h-[90vh] bg-white rounded-xl shadow-2xl overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Close button */}
+              <button
+                onClick={() => setLightboxImage(null)}
+                className="absolute top-3 right-3 z-10 rounded-full bg-black/50 hover:bg-black/70 text-white w-8 h-8 flex items-center justify-center transition-colors text-lg"
+                aria-label="Close image viewer"
+              >
+                ×
+              </button>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={lightboxImage.url}
+                alt={lightboxImage.caption}
+                className="max-w-[85vw] max-h-[80vh] object-contain"
+              />
+              {lightboxImage.caption && (
+                <div className="px-4 py-3 bg-gray-50 border-t text-sm text-gray-700 text-center">
+                  {lightboxImage.caption}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* PDF Viewer Modal for clickable source references */}
         {viewingSource && (

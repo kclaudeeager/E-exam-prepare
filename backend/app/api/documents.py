@@ -52,6 +52,7 @@ def _doc_to_read(doc: Document) -> DocumentRead:
         official_duration_minutes=doc.official_duration_minutes,
         page_count=doc.page_count,
         subject_id=doc.subject_id,
+        collection_name=doc.collection_name,
         is_archived=doc.is_archived,
         archived_at=doc.archived_at,
         archived_by=doc.archived_by,
@@ -550,7 +551,12 @@ def serve_document_pdf(
 
     file_path = Path(doc.file_path)
     if not file_path.exists():
-        raise HTTPException(status_code=404, detail="PDF file not found on server")
+        # Seed documents live in the rag_storage volume, not uploads
+        rag_path = Path("/app/rag_storage/raw") / Path(doc.file_path).relative_to("seed") if doc.file_path.startswith("seed/") else None
+        if rag_path and rag_path.exists():
+            file_path = rag_path
+        else:
+            raise HTTPException(status_code=404, detail="PDF file not found on server")
 
     return FileResponse(
         path=str(file_path),

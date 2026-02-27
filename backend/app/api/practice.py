@@ -118,6 +118,8 @@ def _parse_grade_json(raw: str) -> dict:
 
 def _get_collection_for_document(doc: Document) -> str | None:
     """Get the RAG collection name for a document."""
+    if doc.level.value == "DRIVING":
+        return "DRIVING"
     if doc.collection_name:
         return doc.collection_name
     return f"{doc.level.value}_{doc.subject}".replace(" ", "_")
@@ -144,7 +146,11 @@ async def start_practice_session(
     if not subject:
         raise HTTPException(status_code=404, detail="Subject not found")
 
-    collection = f"{subject.level.value}_{subject.name}".replace(" ", "_")
+    # Special-case for Driving Prep: always use 'DRIVING' as the collection
+    if subject.level.value == "DRIVING":
+        collection = "DRIVING"
+    else:
+        collection = f"{subject.level.value}_{subject.name}".replace(" ", "_")
     document_id = None
 
     # Helper: find docs in this subject (by FK or text matching)

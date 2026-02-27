@@ -150,6 +150,61 @@ class RAGClient:
         r.raise_for_status()
         return r.json()
 
+    # ── Web search ────────────────────────────────────────────────────────
+
+    def web_search(
+        self, query: str, *, max_results: int = 5
+    ) -> dict[str, Any]:
+        """Search the web via the RAG service's DuckDuckGo integration."""
+        r = self._http.post(
+            "/search/web",
+            json={"query": query, "max_results": max_results},
+        )
+        r.raise_for_status()
+        return r.json()
+
+    def web_image_search(
+        self, query: str, *, max_results: int = 5
+    ) -> dict[str, Any]:
+        """Search for images on the web via the RAG service."""
+        r = self._http.post(
+            "/search/web/images",
+            json={"query": query, "max_results": max_results},
+        )
+        r.raise_for_status()
+        return r.json()
+
+    # ── Image serving ─────────────────────────────────────────────────────
+
+    def get_collection_images(self, collection: str) -> dict[str, Any]:
+        """List all extracted images in a collection."""
+        r = self._http.get(f"/images/{collection}")
+        r.raise_for_status()
+        return r.json()
+
+    def get_image_url(self, collection: str, filename: str) -> str:
+        """Get the direct URL for an extracted image."""
+        return f"{self._base}/images/{collection}/{filename}"
+
+    # ── Seed ingestion ────────────────────────────────────────────────────
+
+    def seed_ingest(
+        self, folder: str | None = None, *, overwrite: bool = False
+    ) -> dict[str, Any]:
+        """Ingest curated documents from the raw/ seed folder."""
+        payload: dict[str, Any] = {"overwrite": overwrite}
+        if folder:
+            payload["folder"] = folder
+        r = self._http.post("/ingest/seed", json=payload, timeout=600.0)
+        r.raise_for_status()
+        return r.json()
+
+    def list_seed_folders(self) -> dict[str, Any]:
+        """List available seed folders and their PDF counts."""
+        r = self._http.get("/ingest/seed/available")
+        r.raise_for_status()
+        return r.json()
+
     def close(self) -> None:
         self._http.close()
 

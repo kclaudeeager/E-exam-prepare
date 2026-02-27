@@ -51,6 +51,7 @@ services:
         condition: service_healthy
     volumes:
       - backend_uploads:/app/uploads
+      - rag_storage:/app/rag_storage:ro
     restart: unless-stopped
 
   # ── RAG Service ───────────────────────────────────────────────────────

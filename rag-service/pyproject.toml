@@ -37,6 +37,8 @@ dependencies = [
     "pdfplumber>=0.11.0",
     # HTTP
     "httpx>=0.28.0",
+    # Web search (free, no API key needed)
+    "duckduckgo-search>=7.0.0",
     # Utilities
     "python-dotenv>=1.0.0",
     "pymupdf>=1.27.1",

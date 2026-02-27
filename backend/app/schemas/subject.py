@@ -12,6 +12,7 @@ class EducationLevel(str, Enum):
     S3 = "S3"
     S6 = "S6"
     TTC = "TTC"
+    DRIVING = "DRIVING"
 
 
 class SubjectCreate(BaseModel):

@@ -27,6 +27,14 @@ def ingest_document(self, document_id: str, file_path: str) -> dict:
             logger.error("Document %s not found — skipping ingestion", document_id)
             return {"success": False, "error": "document_not_found"}
 
+        # Skip if already completed (idempotency guard)
+        if doc.ingestion_status == IngestionStatusEnum.COMPLETED:
+            logger.info(
+                "Document %s already ingested (status=COMPLETED) — skipping",
+                document_id,
+            )
+            return {"success": True, "skipped": True, "document_id": document_id}
+
         # 1. Mark as ingesting
         doc.ingestion_status = IngestionStatusEnum.INGESTING
         db.commit()

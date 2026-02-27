@@ -290,13 +290,51 @@ export const progressAPI = {
 
 export interface RAGQueryResponse {
   answer: string;
-  sources: Array<{ rank: number; score: number; content: string; metadata: Record<string, unknown> }>;
+  sources: Array<{
+    rank: number;
+    score: number;
+    content: string;
+    metadata: Record<string, unknown>;
+    image_url?: string;
+    image_caption?: string;
+    content_type?: string;  // "image" | "web_result"
+  }>;
   graph_enhanced: boolean;
+  web_search_used?: boolean;
 }
 
 export interface RAGRetrieveResponse {
   results: Array<{ rank: number; score: number; content: string; metadata: Record<string, unknown> }>;
   graph_paths: Array<unknown>;
+}
+
+export interface WebSearchResult {
+  title: string;
+  href: string;
+  body: string;
+}
+
+export interface WebSearchResponse {
+  success: boolean;
+  results: WebSearchResult[];
+  total: number;
+}
+
+export interface WebImageSearchResult {
+  title: string;
+  image: string;
+  thumbnail: string;
+  url: string;
+  source: string;
+}
+
+export interface CollectionImage {
+  filename: string;
+  page_number: number;
+  width: number;
+  height: number;
+  caption: string;
+  source_pdf: string;
 }
 
 export const ragAPI = {
@@ -321,6 +359,29 @@ export const ragAPI = {
     const response = await apiClient.post<RAGRetrieveResponse>(
       API_ENDPOINTS.RAG_RETRIEVE,
       { query, collection, top_k },
+    );
+    return response.data;
+  },
+
+  webSearch: async (query: string, maxResults = 5): Promise<WebSearchResponse> => {
+    const response = await apiClient.post<WebSearchResponse>(
+      API_ENDPOINTS.RAG_WEB_SEARCH,
+      { query, max_results: maxResults },
+    );
+    return response.data;
+  },
+
+  webImageSearch: async (query: string, maxResults = 5) => {
+    const response = await apiClient.post<{ success: boolean; results: WebImageSearchResult[]; total: number }>(
+      API_ENDPOINTS.RAG_WEB_IMAGE_SEARCH,
+      { query, max_results: maxResults },
+    );
+    return response.data;
+  },
+
+  getCollectionImages: async (collection: string): Promise<{ collection: string; images: CollectionImage[]; total: number }> => {
+    const response = await apiClient.get<{ collection: string; images: CollectionImage[]; total: number }>(
+      API_ENDPOINTS.RAG_COLLECTION_IMAGES(collection),
     );
     return response.data;
   },
